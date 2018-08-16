@@ -3020,9 +3020,9 @@ class ARMP_G(ARMP, _NN):
             n_feat = g.shape[1]
 
             example = tf.train.Example(features=tf.train.Features(feature={
-                'n_atoms': self._int64_feature(n_atoms),
-                'n_space': self._int64_feature(n_space),
-                'n_feat': self._int64_feature(n_feat),
+                # 'n_atoms': self._int64_feature(n_atoms),
+                # 'n_space': self._int64_feature(n_space),
+                # 'n_feat': self._int64_feature(n_feat),
                 'g_raw': self._bytes_feature(tf.compat.as_bytes(g.tostring())),
                 'dg_raw': self._bytes_feature(tf.compat.as_bytes(dg.tostring())),
                 'ene_raw': self._bytes_feature(tf.compat.as_bytes(ene[i].tostring())),
@@ -3176,7 +3176,7 @@ class ARMP_G(ARMP, _NN):
                               self.representation_params['theta_s'].shape[0]
 
         self.n_samples = x_approved.shape[0]
-        max_n_atoms = x_approved.shape[1]
+        self.max_n_atoms = x_approved.shape[1]
 
         batch_size = self._get_batch_size()
         n_batches = ceil(self.n_samples, batch_size)
@@ -3189,12 +3189,13 @@ class ARMP_G(ARMP, _NN):
             # Where the data is stored
             filename = 'training.tfrecords'
             data_path = tf.placeholder(dtype=tf.string, name="tfrecord_file")
-
             # Dataset pipeline
             dataset = tf.data.TFRecordDataset(data_path)
+            # dataset = dataset.repeat(self.iterations)
+            # dataset = dataset.batch(batch_size)
             dataset = dataset.map(self._read_from_tfrecord)
-            dataset = dataset.shuffle(buffer_size=self.n_samples)
-            dataset = dataset.batch(batch_size)
+            # dataset = dataset.shuffle(buffer_size=self.n_samples)
+            dataset = dataset.batch(batch_size).prefetch(2)
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_g, batch_dg_dr, batch_y, batch_dy, batch_zs = iterator.get_next()
 
@@ -3247,15 +3248,16 @@ class ARMP_G(ARMP, _NN):
                     self.tensorboard_logger_training.write_summary(self.session, i)
 
         # This is called so that predictions can be made from xyz as well as from the representation
-        self._build_model_from_xyz(max_n_atoms, element_weights, element_biases)
+        self._build_model_from_xyz(self.max_n_atoms, element_weights, element_biases)
 
         self.loaded_model = True
 
     def _read_from_tfrecord(self, example_proto):
 
-        feature = {'n_atoms': tf.FixedLenFeature([], tf.int64),
-                   'n_space': tf.FixedLenFeature([], tf.int64),
-                   'n_feat': tf.FixedLenFeature([], tf.int64),
+        feature = {
+                   #  'n_atoms': tf.FixedLenFeature([], tf.int64),
+                   # 'n_space': tf.FixedLenFeature([], tf.int64),
+                   # 'n_feat': tf.FixedLenFeature([], tf.int64),
                    'g_raw': tf.FixedLenFeature([], tf.string),
                    'dg_raw': tf.FixedLenFeature([], tf.string),
                    'ene_raw': tf.FixedLenFeature([], tf.string),
@@ -3263,22 +3265,23 @@ class ARMP_G(ARMP, _NN):
                    'forces_raw': tf.FixedLenFeature([], tf.string),
                    }
 
-        features = tf.parse_single_example(example_proto, features=feature)
+        features = tf.parse_example([example_proto], features=feature)
 
-        n_atoms = features['n_atoms']
-        n_space = features['n_space']
-        n_feat = features['n_feat']
+        # n_atoms = features['n_atoms'][0]
+        # n_space = features['n_space'][0]
+        # n_feat = features['n_feat'][0]
         g_1d = tf.decode_raw(features['g_raw'], tf.float64)
         dg_1d = tf.decode_raw(features['dg_raw'], tf.float64)
-        ene = tf.cast(tf.decode_raw(features['ene_raw'], tf.float64), tf.float32)
+        ene_1d = tf.decode_raw(features['ene_raw'], tf.float64)
         zs_1d = tf.decode_raw(features['zs_raw'], tf.int64)
         forces_1d = tf.decode_raw(features['forces_raw'], tf.float64)
 
 
-        g = tf.cast(tf.reshape(g_1d, tf.stack([n_atoms, n_feat])), tf.float32)
-        dg = tf.cast(tf.reshape(dg_1d, tf.stack([n_atoms, n_feat, n_atoms, n_space])), tf.float32)
-        zs = tf.cast(tf.reshape(zs_1d, tf.stack([n_atoms,])), tf.int32)
-        forces = tf.cast(tf.reshape(forces_1d, tf.stack([n_atoms, n_space])), tf.float32)
+        g = tf.cast(tf.reshape(g_1d, tf.stack([self.max_n_atoms, self.n_features])), tf.float32)
+        ene = tf.cast(tf.reshape(ene_1d, tf.stack([1,])), tf.float32)
+        dg = tf.cast(tf.reshape(dg_1d, tf.stack([self.max_n_atoms, self.n_features, self.max_n_atoms, 3])), tf.float32)
+        zs = tf.cast(tf.reshape(zs_1d, tf.stack([self.max_n_atoms,])), tf.int32)
+        forces = tf.cast(tf.reshape(forces_1d, tf.stack([self.max_n_atoms, 3])), tf.float32)
 
         return g, dg, ene, forces, zs
 
