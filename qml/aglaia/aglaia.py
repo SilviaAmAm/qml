@@ -3195,8 +3195,6 @@ class ARMP_G(ARMP, _NN):
             data_path = tf.placeholder(dtype=tf.string, name="tfrecord_file")
             # Dataset pipeline
             dataset = tf.data.TFRecordDataset(data_path)
-            # dataset = dataset.repeat(self.iterations)
-            # dataset = dataset.batch(batch_size)
             dataset = dataset.map(self._read_from_tfrecord)
             # dataset = dataset.shuffle(buffer_size=self.n_samples)
             dataset = dataset.batch(batch_size).prefetch(2)
@@ -3253,8 +3251,6 @@ class ARMP_G(ARMP, _NN):
 
         # This is called so that predictions can be made from xyz as well as from the representation
         self._build_model_from_xyz(self.max_n_atoms, element_weights, element_biases)
-
-        self.loaded_model = True
 
     def _read_from_tfrecord(self, example_proto):
 
@@ -3383,7 +3379,26 @@ class ARMP_G(ARMP, _NN):
             classes_tf = graph.get_tensor_by_name("Inputs_pred/Classes:0")
             ene_nn = graph.get_tensor_by_name("Model_pred/output:0")
             forces_nn = graph.get_tensor_by_name("Model_pred/Forces_nn:0")
-            y_pred, dy_pred = self.session.run([ene_nn, forces_nn], feed_dict={xyz_tf: xyz, classes_tf: classes})
+            init_iterator = graph.get_operation_by_name("Inputs_pred/init_op")
+
+            self.session.run(init_iterator, feed_dict={xyz_tf: xyz, classes_tf: classes})
+
+            tot_y_pred = []
+            tot_dy_pred = []
+
+            while True:
+                try:
+                    y_pred, dy_pred = self.session.run([ene_nn, forces_nn])
+                    tot_y_pred.append(y_pred)
+                    tot_dy_pred.append(dy_pred)
+                except tf.errors.OutOfRangeError:
+                    break
+
+        y_pred = np.concatenate(tot_y_pred, axis=0)
+        dy_pred = np.concatenate(tot_dy_pred, axis=0)
+
+        if y_pred.ndim > 1 and y_pred.shape[1] == 1:
+            y_pred = y_pred.ravel()
 
         return y_pred, dy_pred
 
@@ -3406,16 +3421,17 @@ class ARMP_G(ARMP, _NN):
             xyz_tf = tf.placeholder(shape=[None, n_atoms, 3], dtype=tf.float32, name="xyz")
 
             dataset = tf.data.Dataset.from_tensor_slices((xyz_tf, zs_tf))
-            dataset = dataset.batch(2)
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_xyz, batch_zs = iterator.get_next()
+
+            iterator_init = iterator.make_initializer(dataset, name="init_op")
 
             # batch_xyz = tf.identity(batch_xyz, name="xyz")
             # batch_zs = tf.identity(batch_zs, name="Classes")
 
         with tf.name_scope("Descriptor_pred"):
 
-            batch_representation = generate_parkhill_acsf(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
+            batch_representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
                                                           element_pairs=self.element_pairs,
                                                           radial_cutoff=self.representation_params['radial_cutoff'],
                                                           angular_cutoff=self.representation_params['angular_cutoff'],
