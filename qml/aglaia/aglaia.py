@@ -1116,7 +1116,7 @@ class MRMP(_NN):
             if not is_none(parameters):
                 raise InputError("The representation %s does not take any additional parameters." % (self.representation))
 
-    def _set_representation(self, representation):
+    def _set_representation(self, g):
         """
         This function takes representations as input and stores them inside the class.
 
@@ -1125,10 +1125,10 @@ class MRMP(_NN):
         return: None
         """
 
-        if len(representation.shape) != 2:
-            raise InputError("The representation should have a shape (n_samples, n_features). Got %s" % (str(representation.shape)))
+        if len(g.shape) != 2:
+            raise InputError("The representation should have a shape (n_samples, n_features). Got %s" % (str(g.shape)))
 
-        self.g = representation
+        self.g = g
 
     def _generate_representations_from_data(self, xyz, classes):
         """
@@ -1679,7 +1679,6 @@ class ARMP(_NN):
         else:
             self.method = method
 
-    def _set_representation(self, representation):
     def _set_representation(self, g):
 
         if len(g.shape) != 3:
