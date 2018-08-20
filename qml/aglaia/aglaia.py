@@ -3409,6 +3409,12 @@ class ARMP_G(ARMP, _NN):
 
         # element_weights, element_biases = self._load_weights()
 
+        # Fix to make things match with fortran
+        element_pairs_fortran = []
+        for i, ei in enumerate(self.elements):
+            for ej in self.elements[i:]:
+                element_pairs_fortran.append([int(ej), int(ei)])
+
         with tf.name_scope("Inputs_pred"):
             zs_tf = tf.placeholder(shape=[None, n_atoms], dtype=tf.int32, name="Classes")
             xyz_tf = tf.placeholder(shape=[None, n_atoms, 3], dtype=tf.float32, name="xyz")
@@ -3425,7 +3431,7 @@ class ARMP_G(ARMP, _NN):
         with tf.name_scope("Descriptor_pred"):
 
             batch_representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
-                                                          element_pairs=self.element_pairs,
+                                                          element_pairs=element_pairs_fortran,
                                                           rcut=self.representation_params['rcut'],
                                                           acut=self.representation_params['acut'],
                                                           nRs2=self.representation_params['nRs2'],
@@ -3434,6 +3440,7 @@ class ARMP_G(ARMP, _NN):
                                                           eta2=self.representation_params['eta2'],
                                                           eta3=self.representation_params['eta3'],
                                                           zeta=self.representation_params['zeta'])
+            # tf.identity(batch_representation, "ggg")
 
         with tf.name_scope("Model_pred"):
             batch_energies_nn = self._model(batch_representation, batch_zs, element_weights, element_biases)
