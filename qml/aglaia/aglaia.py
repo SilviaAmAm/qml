@@ -3273,7 +3273,7 @@ class ARMP_G(ARMP, _NN):
         g_1d = tf.decode_raw(features['g_raw'], tf.float64)
         dg_1d = tf.decode_raw(features['dg_raw'], tf.float64)
         ene_1d = tf.decode_raw(features['ene_raw'], tf.float64)
-        zs_1d = tf.decode_raw(features['zs_raw'], tf.int64)
+        zs_1d = tf.decode_raw(features['zs_raw'], tf.float64)
         forces_1d = tf.decode_raw(features['forces_raw'], tf.float64)
 
 
