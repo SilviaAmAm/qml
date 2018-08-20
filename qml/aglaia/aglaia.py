@@ -37,18 +37,18 @@ from qml.aglaia.utils import InputError, ceil, is_positive_or_zero, is_positive_
     is_positive_integer_or_zero_array, check_local_representation, check_dgdr
 
 from qml.aglaia.tf_utils import TensorBoardLogger, partial_derivatives
-from qml.ml.representations import generate_acsf
+from qml.representations import generate_acsf
 
 try:
     from qml.data import Compound
-    from qml.ml import representations as qml_rep
-except ModuleNotFoundError:
-    raise ModuleNotFoundError("The module qml is required")
+    from qml import representations as qml_rep
+except ImportError:
+    raise ImportError("The module qml is required")
 
 try:
     import tensorflow
-except ModuleNotFoundError:
-    raise ModuleNotFoundError("Tensorflow 1.8 is required to run neural networks.")
+except ImportError:
+    raise ImportError("Tensorflow 1.8 is required to run neural networks.")
 
 class _NN(BaseEstimator):
 
@@ -429,6 +429,10 @@ class _NN(BaseEstimator):
 
         if not is_string(tensorboard_subdir):
             raise InputError('Expected string value for variable tensorboard_subdir. Got %s' % str(tensorboard_subdir))
+
+        # This line is needed for when the estimator is cloned
+        self.tensorboard_subdir = tensorboard_subdir
+        self.store_frequency = store_frequency
 
         # TensorBoardLogger will handle all tensorboard related things
         self.tensorboard_logger_training = TensorBoardLogger(tensorboard_subdir + '/training')
