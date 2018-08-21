@@ -815,7 +815,7 @@ class _NN(BaseEstimator):
             raise InputError("Classes cannot be set to none.")
         else:
             if is_positive_integer_or_zero_array(classes):
-                self.classes = np.asarray(classes)
+                self.classes = np.asarray(classes, dtype=np.int32)
             else:
                 raise InputError('Variable "classes" expected to be array like of positive integers.')
 
@@ -2996,13 +2996,14 @@ class ARMP_G(ARMP, _NN):
         # Creating the tfrecord file that contains all the things that are needed for training
         if purpose == "training":
             writer = tf.python_io.TFRecordWriter("training.tfrecords")
-        if purpose == "predict":
+        elif purpose == "predict":
             writer = tf.python_io.TFRecordWriter("predict.tfrecords")
+        elif purpose == "retraining":
+            writer = tf.python_io.TFRecordWriter("retraining.tfrecords")
+        else:
+            raise InputError("Wrong purpose for the TFRecord writer!")
 
         for i in range(xyz.shape[0]):
-
-            n_atoms = xyz[i].shape[0]
-            n_space = xyz[i].shape[1]
 
             g, dg = generate_acsf(coordinates=xyz[i], elements=elements, gradients=True, nuclear_charges=classes[i],
                                   rcut=self.representation_params['rcut'],
@@ -3014,12 +3015,7 @@ class ARMP_G(ARMP, _NN):
                                   eta3=self.representation_params['eta3'],
                                   zeta=self.representation_params['zeta'])
 
-            n_feat = g.shape[1]
-
             example = tf.train.Example(features=tf.train.Features(feature={
-                # 'n_atoms': self._int64_feature(n_atoms),
-                # 'n_space': self._int64_feature(n_space),
-                # 'n_feat': self._int64_feature(n_feat),
                 'g_raw': self._bytes_feature(tf.compat.as_bytes(g.tostring())),
                 'dg_raw': self._bytes_feature(tf.compat.as_bytes(dg.tostring())),
                 'ene_raw': self._bytes_feature(tf.compat.as_bytes(ene[i].tostring())),
@@ -3079,18 +3075,20 @@ class ARMP_G(ARMP, _NN):
     def _fit_from_loaded(self, x, y, classes, dy, dgdr):
 
         if self.session == None:
-            raise InputError("The Tensorflow session appears to not exisit.")
+            raise InputError("The Tensorflow session appears to not exist.")
 
-        g_approved, y_approved, classes_approved, dy_approved, dg_dr_approved = self._check_inputs(x, y, classes, dy,
-                                                                                                   dgdr)
+        x_approved, y_approved, classes_approved, dy_approved = self._check_inputs(x, y, classes, dy, dgdr)
+
+        self._generate_dataset(x_approved, y_approved, classes_approved, dy_approved, purpose="retraining")
+
         if is_none(self.element_pairs) and is_none(self.elements):
             self.elements, self.element_pairs = self._get_elements_and_pairs(classes_approved)
-            self.n_features = self.elements.shape[0] * self.representation_params['radial_rs'].shape[0] + \
-                              self.element_pairs.shape[0] * self.representation_params['angular_rs'].shape[0] * \
-                              self.representation_params['theta_s'].shape[0]
+            self.n_features = self.elements.shape[0] * self.representation_params['nRs2'] + \
+                              self.element_pairs.shape[0] * self.representation_params['nRs3'] * \
+                              self.representation_params['nTs']
 
-        self.n_samples = g_approved.shape[0]
-        max_n_atoms = g_approved.shape[1]
+        self.n_samples = x_approved.shape[0]
+        self.max_n_atoms = x_approved.shape[1]
 
         batch_size = self._get_batch_size()
         n_batches = ceil(self.n_samples, batch_size)
@@ -3103,33 +3101,21 @@ class ARMP_G(ARMP, _NN):
 
         with graph.as_default():
             # Reloading all the needed operations and tensors
-            g_tf = graph.get_tensor_by_name("Data/Descriptors:0")
-            zs_tf = graph.get_tensor_by_name("Data/Classes:0")
-            dg_dr_tf = graph.get_tensor_by_name("Data/dG_dr:0")
-            true_ene = graph.get_tensor_by_name("Data/Properties:0")
-            true_forces = graph.get_tensor_by_name("Data/Forces:0")
+            filename_tf = graph.get_tensor_by_name("Data/tfrecord_file:0")
+            init_iterator_op = graph.get_operation_by_name("dataset_init")
 
             cost = graph.get_tensor_by_name("Cost/add_6:0")
 
             optimisation_op = graph.get_operation_by_name("optimisation_op")
-            dataset_init_op = graph.get_operation_by_name("dataset_init")
-
-            output_grad = graph.get_tensor_by_name("Model/output_grad:0")
 
             # Recording cost to tensorboard
             if self.tensorboard:
                 cost_summary = self.tensorboard_logger_training.write_cost_summary(cost)
 
             # Running the operations needed
-            self.session.run(dataset_init_op,
-                             feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                        true_ene: y_approved, true_forces: dy_approved})
-
             for i in range(self.iterations):
 
-                self.session.run(dataset_init_op,
-                                 feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                            true_ene: y_approved, true_forces: dy_approved})
+                self.session.run(init_iterator_op, feed_dict={filename_tf: "retraining.tfrecords"})
 
                 for j in range(n_batches):
                     if self.tensorboard:
@@ -3138,11 +3124,10 @@ class ARMP_G(ARMP, _NN):
                     else:
                         self.session.run(optimisation_op)
 
-                self.session.run(dataset_init_op,
-                                 feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                            true_ene: y_approved, true_forces: dy_approved})
+
                 if self.tensorboard:
                     if i % self.tensorboard_logger_training.store_frequency == 0:
+                        self.session.run(init_iterator_op, feed_dict={filename_tf: "retraining.tfrecords"})
                         self.tensorboard_logger_training.write_summary(self.session, i)
 
     def _fit_from_scratch(self, x, y, classes, dy, dgdr):
@@ -3260,15 +3245,11 @@ class ARMP_G(ARMP, _NN):
 
         features = tf.parse_example([example_proto], features=feature)
 
-        # n_atoms = features['n_atoms'][0]
-        # n_space = features['n_space'][0]
-        # n_feat = features['n_feat'][0]
         g_1d = tf.decode_raw(features['g_raw'], tf.float64)
         dg_1d = tf.decode_raw(features['dg_raw'], tf.float64)
         ene_1d = tf.decode_raw(features['ene_raw'], tf.float64)
-        zs_1d = tf.decode_raw(features['zs_raw'], tf.float64)
+        zs_1d = tf.decode_raw(features['zs_raw'], tf.int32)
         forces_1d = tf.decode_raw(features['forces_raw'], tf.float64)
-
 
         g = tf.cast(tf.reshape(g_1d, tf.stack([self.max_n_atoms, self.n_features])), tf.float32)
         ene = tf.cast(tf.reshape(ene_1d, tf.stack([1,])), tf.float32)
@@ -3558,11 +3539,7 @@ class ARMP_G(ARMP, _NN):
         graph = tf.get_default_graph()
 
         with graph.as_default():
-            g = graph.get_tensor_by_name("Data/Descriptors:0")
-            dg_dr = graph.get_tensor_by_name("Data/dG_dr:0")
-            zs = graph.get_tensor_by_name("Data/Classes:0")
-            true_ene = graph.get_tensor_by_name("Data/Properties:0")
-            true_forces = graph.get_tensor_by_name("Data/Forces:0")
+            filename_tf = graph.get_tensor_by_name("Data/tfrecord_file:0")
             model = graph.get_tensor_by_name("Model/output:0")
 
             xyz = graph.get_tensor_by_name("Inputs_pred/xyz:0")
@@ -3571,9 +3548,9 @@ class ARMP_G(ARMP, _NN):
             forces_nn = graph.get_tensor_by_name("Model_pred/Forces_nn:0")
 
         tf.saved_model.simple_save(self.session, export_dir=save_dir,
-                                   inputs={"Data/Descriptors:0": g, "Data/dG_dr:0": dg_dr, "Data/Classes:0":zs,
+                                   inputs={"Data/tfrecord_file:0": filename_tf,
                                            "Inputs_pred/xyz:0": xyz, "Inputs_pred/Classes:0": classes,
-                                           "Data/Properties:0": true_ene, "Data/Forces:0": true_forces},
+                                           },
                                    outputs={"Model/output:0": model, "Model_pred/output:0": ene_nn,
                                             "Model_pred/Forces_nn:0":forces_nn})
 
