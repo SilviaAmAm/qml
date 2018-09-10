@@ -30,41 +30,41 @@ from qml.aglaia.utils import InputError
 import glob
 from qml.aglaia.utils import is_array_like
 import os
+import tensorflow as tf
 
 def test_set_representation():
     """
     This function tests the function _set_representation.
     """
     try:
-        ARMP_G(representation='acsf', representation_params={'slatm_sigma12': 0.05})
+        ARMP_G(representation_name='acsf', representation_params={'slatm_sigma12': 0.05})
         raise Exception
     except InputError:
         pass
 
     try:
-        ARMP_G(representation='coulomb_matrix')
+        ARMP_G(representation_name='coulomb_matrix')
         raise Exception
     except InputError:
         pass
 
     try:
-        ARMP_G(representation='slatm')
+        ARMP_G(representation_name='slatm')
         raise Exception
     except InputError:
         pass
 
-    parameters = {'rcut': 10.0, 'acut': 10.0, 'nRs2': 3, 'nRs3': 3, 'nTs': 2,
-                                      'zeta': 3.0, 'eta2': 2.0, 'eta3': 3.0}
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
 
-    estimator = ARMP_G(representation='acsf', representation_params=parameters)
+    estimator = ARMP_G(representation_name='acsf', representation_params=acsf_params)
 
-    assert estimator.representation == 'acsf'
+    assert estimator.representation_name == 'acsf'
 
-    for key, value in estimator.representation_params.items():
+    for key, value in estimator.acsf_parameters.items():
         if is_array_like(value):
-            assert np.all(estimator.representation_params[key] == parameters[key])
+            assert np.all(estimator.acsf_parameters[key] == acsf_params[key])
         else:
-            assert estimator.representation_params[key] == parameters[key]
+            assert estimator.acsf_parameters[key] == acsf_params[key]
 
 def test_set_properties():
     """
@@ -142,7 +142,7 @@ def test_fit_1():
     filenames.sort()
     forces =  data["arr_3"][:2]
 
-    estimator = ARMP_G(representation="acsf")
+    estimator = ARMP_G(representation_name="acsf")
     estimator.generate_compounds(filenames[:2])
     estimator.set_properties(energies[:2])
     estimator.set_gradients(forces)
@@ -195,6 +195,8 @@ def test_score_3():
     """
     This function tests that all the scoring functions work.
     """
+    tf.reset_default_graph()
+
     test_dir = os.path.dirname(os.path.realpath(__file__))
 
     data = np.load(test_dir + "/data/local_acsf_light.npz")

@@ -59,7 +59,7 @@ def test_set_representation():
 
     estimator = ARMP(representation_name='slatm', representation_params=parameters)
 
-    assert estimator.representation == 'slatm'
+    assert estimator.representation_name == 'slatm'
     assert estimator.representation_params == parameters
 
 def test_set_properties():
@@ -214,9 +214,9 @@ def test_predict_fromxyz():
 
     ene_true = np.array([0.5, 0.9, 1.0])
 
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
     estimator = ARMP(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
-                     representation_params={"radial_rs": np.arange(0, 10, 5), "angular_rs": np.arange(0, 10, 5),
-                                           "theta_s": np.arange(0, 3.14, 3)})
+                     representation_params=acsf_params)
 
     estimator.set_properties(ene_true)
     estimator.generate_representation(xyz, zs)
@@ -232,9 +232,9 @@ def test_predict_fromxyz():
 
     estimator.save_nn(save_dir="temp")
 
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
     new_estimator = ARMP(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
-                         representation_params={"radial_rs": np.arange(0, 10, 5), "angular_rs": np.arange(0, 10, 5),
-                                           "theta_s": np.arange(0, 3.14, 3)})
+                         representation_params=acsf_params)
 
     new_estimator.load_nn(save_dir="temp")
 
@@ -259,9 +259,9 @@ def test_retraining():
 
     ene_true = np.array([0.5, 0.9, 1.0])
 
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
     estimator = ARMP(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
-                     representation_params={"radial_rs": np.arange(0, 10, 5), "angular_rs": np.arange(0, 10, 5),
-                                            "theta_s": np.arange(0, 3.14, 3)})
+                     representation_params=acsf_params)
 
     estimator.set_properties(ene_true)
     estimator.generate_representation(xyz, zs)
@@ -279,9 +279,9 @@ def test_retraining():
 
     pred2 = estimator.predict(idx)
 
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
     new_estimator = ARMP(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
-                         representation_params={"radial_rs": np.arange(0, 10, 5), "angular_rs": np.arange(0, 10, 5),
-                                            "theta_s": np.arange(0, 3.14, 3)})
+                         representation_params=acsf_params)
     new_estimator.set_properties(ene_true)
     new_estimator.generate_representation(xyz, zs)
 
