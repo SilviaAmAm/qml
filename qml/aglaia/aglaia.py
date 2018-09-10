@@ -2957,37 +2957,6 @@ class ARMP_G(ARMP, _NN):
 
         return approved_y, approved_dy
 
-    def _get_elements_and_pairs(self, classes):
-        """
-        This function generates the atom centred symmetry functions.
-
-        :param classes: The different types of atoms present in the system
-        :type classes: numpy array of shape (n_samples, n_atoms)
-        :return: elements and element pairs in the system
-        :rtype: numpy array of shape (n_elements,) and (n_element_pairs)
-        """
-
-        # Obtaining the total elements and the element pairs
-        mbtypes = qml_rep.get_slatm_mbtypes(classes)
-
-        elements = []
-        element_pairs = []
-
-        # Splitting the one and two body interactions in mbtypes
-        for item in mbtypes:
-            if len(item) == 1:
-                elements.append(item[0])
-            if len(item) == 2:
-                element_pairs.append(list(item))
-            if len(item) == 3:
-                break
-
-        # Need the element pairs in descending order for TF
-        for item in element_pairs:
-            item.reverse()
-
-        return np.asarray(elements), np.asarray(element_pairs)
-
     def _make_weights_biases(self, train_elements):
         """
         This function uses the self.elements data to initialise tensors of weights and biases for each element present
@@ -3140,17 +3109,11 @@ class ARMP_G(ARMP, _NN):
         :return: representations and their derivatives wrt to xyz
         :rtype: numpy array of shape (n_samples, n_atoms, n_features) and (n_samples, n_atoms, n_features, n_atoms, 3)
         """
-        if is_none(self.element_pairs) and is_none(self.elements):
-            self.elements, self.element_pairs = self._get_elements_and_pairs(self.classes)
-            self.n_features = self.elements.shape[0] * self.representation_params['nRs2'] + \
-                              self.element_pairs.shape[0] * self.representation_params['nRs3'] * \
-                              self.representation_params['nTs']
+
+        elements, element_pairs = self._get_elements_and_pairs(classes)
 
         n_samples = xyz.shape[0]
         n_atoms = xyz.shape[1]
-
-        # NOTE: Resets graph, so make sure model is created afterwards
-        # tf.reset_default_graph()
 
         if self.tensorboard:
             self.tensorboard_logger_representation.initialise()
@@ -3166,8 +3129,8 @@ class ARMP_G(ARMP, _NN):
 
         with tf.name_scope("Descriptor"):
 
-            representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
-                                                           element_pairs=self.element_pairs,
+            representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
+                                                           element_pairs=element_pairs,
                                                            rcut=self.acsf_parameters['rcut'],
                                                            acut=self.acsf_parameters['acut'],
                                                            nRs2=self.acsf_parameters['nRs2'],
@@ -3324,6 +3287,7 @@ class ARMP_G(ARMP, _NN):
             dg_dr_tf = graph.get_tensor_by_name("Data/dG_dr:0")
             true_ene = graph.get_tensor_by_name("Data/Properties:0")
             true_forces = graph.get_tensor_by_name("Data/Forces:0")
+            tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
 
             cost = graph.get_tensor_by_name("Cost/add_6:0")
 
@@ -3336,16 +3300,16 @@ class ARMP_G(ARMP, _NN):
             if self.tensorboard:
                 cost_summary = self.tensorboard_logger_training.write_cost_summary(cost)
 
-            # Running the operations needed
-            self.session.run(dataset_init_op,
-                             feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                        true_ene: y_approved, true_forces: dy_approved})
-
             for i in range(self.iterations):
+
+                if i % 2 == 0:
+                    buff = int(3.5 * batch_size)
+                else:
+                    buff = int(4.5 * batch_size)
 
                 self.session.run(dataset_init_op,
                                  feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                            true_ene: y_approved, true_forces: dy_approved})
+                                            true_ene: y_approved, true_forces: dy_approved, tf_buffer: buff})
 
                 for j in range(n_batches):
                     if self.tensorboard:
@@ -3354,11 +3318,11 @@ class ARMP_G(ARMP, _NN):
                     else:
                         self.session.run(optimisation_op)
 
-                self.session.run(dataset_init_op,
-                                 feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                            true_ene: y_approved, true_forces: dy_approved})
                 if self.tensorboard:
                     if i % self.tensorboard_logger_training.store_frequency == 0:
+                        self.session.run(dataset_init_op,
+                                         feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
+                                                    true_ene: y_approved, true_forces: dy_approved, tf_buffer: buff})
                         self.tensorboard_logger_training.write_summary(self.session, i)
 
     def _fit_from_scratch(self, x, y, dy, classes, dgdr):
@@ -3403,9 +3367,10 @@ class ARMP_G(ARMP, _NN):
             dg_dr_tf = tf.placeholder(shape=[None, max_n_atoms, self.n_features, max_n_atoms, 3], dtype=tf.float32, name="dG_dr")
             true_ene = tf.placeholder(shape=[None, 1], dtype=tf.float32, name="Properties")
             true_forces = tf.placeholder(shape=[None, max_n_atoms, 3], dtype=tf.float32, name="Forces")
+            buffer_tf = tf.placeholder(dtype=tf.int64, name="buffer")
 
             dataset = tf.data.Dataset.from_tensor_slices((g_tf, dg_dr_tf, true_ene, true_forces, zs_tf))
-            dataset = dataset.shuffle(buffer_size=self.n_samples)
+            dataset = dataset.shuffle(buffer_size=buffer_tf)
             dataset = dataset.batch(batch_size)
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_g, batch_dg_dr, batch_y, batch_dy, batch_zs = iterator.get_next()
@@ -3438,11 +3403,17 @@ class ARMP_G(ARMP, _NN):
             self.tensorboard_logger_training.set_summary_writer(self.session)
 
         self.session.run(init)
-        self.session.run(iterator_init, feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved, true_ene: y_approved, true_forces: dy_approved})
 
         for i in range(self.iterations):
 
-            self.session.run(iterator_init, feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved, true_ene: y_approved, true_forces: dy_approved})
+            if i % 2 == 0:
+                buff = int(3.5 * batch_size)
+            else:
+                buff = int(4.5 * batch_size)
+
+            self.session.run(iterator_init, feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved,
+                                                       zs_tf: classes_approved, true_ene: y_approved,
+                                                       true_forces: dy_approved, buffer_tf:buff})
 
             for j in range(n_batches):
                 if self.tensorboard:
@@ -3457,7 +3428,7 @@ class ARMP_G(ARMP, _NN):
                 if i % self.tensorboard_logger_training.store_frequency == 0:
                     self.session.run(iterator_init,
                                      feed_dict={g_tf: g_approved, dg_dr_tf: dg_dr_approved, zs_tf: classes_approved,
-                                                true_ene: y_approved, true_forces: dy_approved})
+                                                true_ene: y_approved, true_forces: dy_approved, buffer_tf:buff})
                     self.tensorboard_logger_training.write_summary(self.session, i)
 
         # This is called so that predictions can be made from xyz as well as from the representation
@@ -3522,11 +3493,12 @@ class ARMP_G(ARMP, _NN):
             output_grad = graph.get_tensor_by_name("Model/output_grad:0")
             true_ene = graph.get_tensor_by_name("Data/Properties:0")
             true_forces = graph.get_tensor_by_name("Data/Forces:0")
+            tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
 
             dataset_init_op = graph.get_operation_by_name("dataset_init")
 
             self.session.run(dataset_init_op, feed_dict={g_tf: g_approved, zs_tf:classes_approved, dg_dr_tf: dg_dr_approved,
-                                                         true_ene: empty_ene, true_forces: empty_forces})
+                                                         true_ene: empty_ene, true_forces: empty_forces, tf_buffer:1})
 
             tot_y_pred = []
             tot_dy_pred = []
@@ -3565,9 +3537,27 @@ class ARMP_G(ARMP, _NN):
             classes_tf = graph.get_tensor_by_name("Inputs_pred/Classes:0")
             ene_nn = graph.get_tensor_by_name("Model_pred/output:0")
             forces_nn = graph.get_tensor_by_name("Model_pred/Forces_nn:0")
-            y_pred, dy_pred = self.session.run([ene_nn, forces_nn], feed_dict={xyz_tf: xyz, classes_tf: classes})
+            init = graph.get_operation_by_name("Inputs_pred/dataset_init")
+            self.session.run(init, feed_dict={xyz_tf: xyz, classes_tf: classes} )
 
-        return y_pred, dy_pred
+            tot_y_pred = []
+            tot_dy_pred = []
+
+            while True:
+                try:
+                    y_pred, dy_pred = self.session.run([ene_nn, forces_nn])
+                    tot_y_pred.append(y_pred)
+                    tot_dy_pred.append(dy_pred)
+                except tf.errors.OutOfRangeError:
+                    break
+
+        tot_y_pred = np.concatenate(tot_y_pred, axis=0)
+        tot_dy_pred = np.concatenate(tot_dy_pred, axis=0)
+
+        if tot_y_pred.ndim > 1 and tot_y_pred.shape[1] == 1:
+            tot_y_pred = tot_y_pred.ravel()
+
+        return tot_y_pred, tot_dy_pred
 
     def _build_model_from_xyz(self, n_atoms, element_weights, element_biases):
         """
@@ -3588,16 +3578,16 @@ class ARMP_G(ARMP, _NN):
             xyz_tf = tf.placeholder(shape=[None, n_atoms, 3], dtype=tf.float32, name="xyz")
 
             dataset = tf.data.Dataset.from_tensor_slices((xyz_tf, zs_tf))
-            dataset = dataset.batch(2)
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_xyz, batch_zs = iterator.get_next()
+            iterator_init = iterator.make_initializer(dataset, name="dataset_init")
 
             # batch_xyz = tf.identity(batch_xyz, name="xyz")
             # batch_zs = tf.identity(batch_zs, name="Classes")
 
         with tf.name_scope("Descriptor_pred"):
 
-            batch_representation = generate_parkhill_acsf(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
+            batch_representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
                                                           element_pairs=self.element_pairs,
                                                           rcut=self.acsf_parameters['rcut'],
                                                           acut=self.acsf_parameters['acut'],
