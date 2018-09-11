@@ -31,6 +31,7 @@ import glob
 from qml.aglaia.utils import is_array_like
 import os
 import tensorflow as tf
+import shutil
 
 def test_set_representation():
     """
@@ -235,12 +236,76 @@ def test_predict_3():
     assert energies.shape == energies_pred.shape
     assert forces.shape == dy_pred.shape
 
+def test_predict_fromxyz():
+    """
+    This test checks that the predictions from the "predict" and the "predict_from_xyz" functions are the same.
+    It also checks that if the model is saved, when the model is reloaded the predictions are still the same.
+    """
+
+    xyz = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
+           [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
+           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
+    zs = np.array([[1, 2, 3],
+          [1, 2, 3],
+          [1, 2, 3]])
+
+    ene_true = np.array([0.5, 0.9, 1.0])
+    forces_true = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
+                    [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
+                    [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
+
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
+    estimator = ARMP_G(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
+                     representation_params=acsf_params)
+
+    estimator.set_xyz(xyz)
+    estimator.set_classes(zs)
+    estimator.set_properties(ene_true)
+    estimator.set_gradients(forces_true)
+
+    estimator.generate_representation(method="fortran")
+
+    idx = list(range(xyz.shape[0]))
+
+    estimator.fit(idx)
+
+    ene1, f1 = estimator.predict(idx)
+    ene2, f2 = estimator.predict_from_xyz(xyz, zs)
+
+    print(ene1, ene2)
+
+    assert np.all(np.isclose(ene1, ene2, rtol=1.e-6))
+
+    estimator.save_nn(save_dir="temp")
+
+    acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
+    new_estimator = ARMP_G(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
+                         representation_params=acsf_params)
+
+    new_estimator.load_nn(save_dir="temp")
+
+    new_estimator.set_xyz(xyz)
+    new_estimator.set_classes(zs)
+    new_estimator.set_properties(ene_true)
+    new_estimator.set_gradients(forces_true)
+
+    new_estimator.generate_representation(method="fortran")
+
+    ene3, f3 = new_estimator.predict(idx)
+    ene4, f4 = new_estimator.predict_from_xyz(xyz, zs)
+
+    assert np.all(np.isclose(ene3, ene4, rtol=1.e-6))
+    assert np.all(np.isclose(ene1, ene3, rtol=1.e-6))
+
+    shutil.rmtree("temp")
+
 if __name__ == "__main__":
-    test_set_representation()
-    test_set_properties()
-    test_set_representation_and_dgdr()
-    test_fit_1()
-    test_fit_2()
-    test_fit_3()
-    test_score_3()
-    test_predict_3()
+    # test_set_representation()
+    # test_set_properties()
+    # test_set_representation_and_dgdr()
+    # test_fit_1()
+    # test_fit_2()
+    # test_fit_3()
+    # test_score_3()
+    # test_predict_3()
+    test_predict_fromxyz()

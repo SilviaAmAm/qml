@@ -3189,7 +3189,7 @@ class ARMP_G(ARMP, _NN):
         :rtype: numpy array of shape (n_samples, n_atoms, n_features) and (n_samples, n_atoms, n_features, n_atoms, 3)
         """
 
-        elements, element_paris = self._get_elements_and_pairs(classes)
+        elements, _ = self._get_elements_and_pairs(classes)
 
         representation = []
         dgdr = []
