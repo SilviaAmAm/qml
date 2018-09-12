@@ -272,8 +272,6 @@ def test_predict_fromxyz():
     ene1, f1 = estimator.predict(idx)
     ene2, f2 = estimator.predict_from_xyz(xyz, zs)
 
-    print(ene1, ene2)
-
     assert np.all(np.isclose(ene1, ene2, rtol=1.e-6))
 
     estimator.save_nn(save_dir="temp")
