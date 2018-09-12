@@ -2390,6 +2390,8 @@ class ARMP(_NN):
         init = tf.global_variables_initializer()
         iterator_init = iterator.make_initializer(dataset, name="dataset_init")
 
+        self._build_model_from_xyz(self.n_atoms, element_weights, element_biases)
+
         self.session = tf.Session()
 
         # Running the graph
@@ -2429,9 +2431,7 @@ class ARMP(_NN):
 
             self.training_cost.append(avg_cost/n_batches)
 
-        self._build_model_from_xyz(self.n_atoms, element_weights, element_biases)
-
-    def _fit_from_loaded(self, x, y, dy, classes, dgdr):
+    def _fit_from_loaded(self, x, y, dy, classes):
         """
        This function carries on fitting an atomic decomposed network to the data after it has been loaded.
 
@@ -2475,14 +2475,10 @@ class ARMP(_NN):
             tf_x = graph.get_tensor_by_name("Data/Descriptors:0")
             tf_zs = graph.get_tensor_by_name("Data/Atomic-numbers:0")
             tf_ene = graph.get_tensor_by_name("Data/Properties:0")
-            cost = graph.get_tensor_by_name("Cost_func/add_13:0")
             tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
 
             optimisation_op = graph.get_operation_by_name("optimisation_op")
             dataset_init_op = graph.get_operation_by_name("dataset_init")
-
-        if self.tensorboard:
-            cost_summary = self.tensorboard_logger_training.write_cost_summary(cost)
 
         for i in range(self.iterations):
 
