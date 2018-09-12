@@ -2431,7 +2431,7 @@ class ARMP(_NN):
 
             self.training_cost.append(avg_cost/n_batches)
 
-    def _fit_from_loaded(self, x, y, dy, classes):
+    def _fit_from_loaded(self, x, y, dy, classes, dgdr):
         """
        This function carries on fitting an atomic decomposed network to the data after it has been loaded.
 
@@ -3116,7 +3116,7 @@ class ARMP_G(ARMP, _NN):
 
         # since it has to be 1
         with tf.name_scope("Inputs_G"):
-            zs_tf = tf.placeholder(shape=[n_samples, n_atoms], dtype=tf.int32, name="zs")
+            zs_tf = tf.placeholder(shape=[n_samples, n_atoms], dtype=tf.int32, name="Classes")
             xyz_tf = tf.placeholder(shape=[n_samples, n_atoms, 3], dtype=tf.float32, name="xyz")
 
             dataset = tf.data.Dataset.from_tensor_slices((xyz_tf, zs_tf))

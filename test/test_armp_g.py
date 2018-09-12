@@ -272,8 +272,6 @@ def test_predict_fromxyz():
     ene1, f1 = estimator.predict(idx)
     ene2, f2 = estimator.predict_from_xyz(xyz, zs)
 
-    print(ene1, ene2)
-
     assert np.all(np.isclose(ene1, ene2, rtol=1.e-6))
 
     estimator.save_nn(save_dir="temp")
@@ -300,12 +298,12 @@ def test_predict_fromxyz():
     shutil.rmtree("temp")
 
 if __name__ == "__main__":
-    # test_set_representation()
-    # test_set_properties()
-    # test_set_representation_and_dgdr()
-    # test_fit_1()
-    # test_fit_2()
-    # test_fit_3()
-    # test_score_3()
-    # test_predict_3()
+    test_set_representation()
+    test_set_properties()
+    test_set_representation_and_dgdr()
+    test_fit_1()
+    test_fit_2()
+    test_fit_3()
+    test_score_3()
+    test_predict_3()
     test_predict_fromxyz()
