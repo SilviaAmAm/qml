@@ -27,7 +27,7 @@ This test checks if all the ways of setting up the estimator ARMP work.
 
 import numpy as np
 from qml.aglaia.aglaia import ARMP
-from qml.aglaia.utils import InputError
+from qml.utils import InputError
 import glob
 import os
 import shutil
@@ -236,6 +236,7 @@ def test_predict_fromxyz():
     new_estimator = ARMP(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
                          representation_params=acsf_params)
 
+
     new_estimator.load_nn(save_dir="temp")
 
     new_estimator.set_properties(ene_true)
@@ -282,6 +283,7 @@ def test_retraining():
     acsf_params = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
     new_estimator = ARMP(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
                          representation_params=acsf_params)
+
     new_estimator.set_properties(ene_true)
     new_estimator.generate_representation(xyz, zs)
 
