@@ -26,9 +26,9 @@ This test checks if all the ways of setting up the estimator ARMP work.
 
 import numpy as np
 from qml.aglaia.aglaia import ARMP_G
-from qml.aglaia.utils import InputError
+from qml.utils.utils import InputError
 import glob
-from qml.aglaia.utils import is_array_like
+from qml.utils.utils import is_array_like
 import os
 import tensorflow as tf
 import shutil
@@ -241,6 +241,8 @@ def test_predict_fromxyz():
     This test checks that the predictions from the "predict" and the "predict_from_xyz" functions are the same.
     It also checks that if the model is saved, when the model is reloaded the predictions are still the same.
     """
+
+    tf.reset_default_graph()
 
     xyz = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
            [[1, 2, 2], [3, 1, 2], [1, 3, 4]],

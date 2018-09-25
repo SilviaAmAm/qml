@@ -727,7 +727,7 @@ class _NN(BaseEstimator):
             raise InputError("QML compounds need to be created in advance or Cartesian coordinates need to be passed in "
                              "order to generate the representation.")
 
-        if isinstance(self.g, type(None)):
+        if not isinstance(self.g, type(None)):
             raise InputError("The representations have already been set!")
 
         if isinstance(self.compounds, type(None)):
@@ -759,7 +759,7 @@ class _NN(BaseEstimator):
 
     def set_xyz(self, xyz):
 
-        if is_none(xyz):
+        if isinstance(xyz, type(None)):
             raise InputError("The cartesian coordinates cannot be set to none.")
         else:
             if is_numeric_array(xyz) and np.asarray(xyz).ndim == 3:
@@ -1490,7 +1490,7 @@ class MRMP(_NN):
         if classes is not None:
             raise InputError("MRMP estimator cannot do atomic decomposition.")
 
-        if not is_none(dgdr):
+        if not isinstance(dgdr, type(None)):
             raise InputError("MRMP does not need gradients of the representation.")
 
         # Check if x is made up of indices or data
