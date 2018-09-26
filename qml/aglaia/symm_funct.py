@@ -197,16 +197,18 @@ def acsf_ang(xyzs, Zs, angular_cutoff, angular_rs, theta_s, zeta, eta):
         # Subtracting them and do the cos
         cos_theta_term = tf.cos(
             tf.subtract(expanded_theta, expanded_theta_s))  # (n_samples,  n_atoms, n_atoms, n_atoms, n_theta_s)
-        # Make the whole cos term  of the sum
-        cos_term = tf.pow(tf.add(tf.ones(tf.shape(cos_theta_term), dtype=tf.float32), cos_theta_term),
-                          zeta)  # (n_samples,  n_atoms, n_atoms, n_atoms, n_theta_s)
+        # Make the whole cos term  of the sum of shape (n_samples,  n_atoms, n_atoms, n_atoms, n_theta_s)
+        cos_term = tf.pow(tf.divide(tf.add(tf.ones(tf.shape(cos_theta_term), dtype=tf.float32), cos_theta_term),
+                                    tf.constant(2, dtype=tf.float32)), zeta)
+        # cos_term = tf.pow(tf.add(tf.ones(tf.shape(cos_theta_term), dtype=tf.float32), cos_theta_term),
+        #                   zeta)  # (n_samples,  n_atoms, n_atoms, n_atoms, n_theta_s)
 
     # Final product of terms inside the sum time by 2^(1-zeta)
     expanded_fc = tf.expand_dims(tf.expand_dims(cleaner_fc_term, axis=-1), axis=-1, name="Expanded_fc")
     expanded_cos = tf.expand_dims(cos_term, axis=-2, name="Expanded_cos")
     expanded_exp = tf.expand_dims(exp_term, axis=-1, name="Expanded_exp")
 
-    const = tf.pow(tf.constant(2.0, dtype=tf.float32), (1.0 - zeta))
+    const = tf.constant(2.0, dtype=tf.float32)
 
     with tf.name_scope("Ang_term"):
         prod_of_terms = const * tf.multiply(tf.multiply(expanded_cos, expanded_exp),
@@ -348,8 +350,7 @@ def sum_ang(pre_sumterm, Zs, element_pairs_list, angular_rs, theta_s):
 
     return clean_final_term
 
-def generate_parkhill_acsf(xyzs, Zs, elements, element_pairs, rcut, acut,
-                           nRs2, nRs3, nTs, zeta, eta2, eta3):
+def generate_parkhill_acsf(xyzs, Zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta):
     """
     This function generates the atom centred symmetry function as used in the Tensormol paper. Currently only tested for
     single systems with many conformations. It requires the coordinates of all the atoms in each data sample, the atomic
@@ -367,7 +368,6 @@ def generate_parkhill_acsf(xyzs, Zs, elements, element_pairs, rcut, acut,
     :param nTs: positive integer
     :param zeta: scalar float
     :param eta2: scalar float
-
     :return: a tf tensor of shape (n_samples, n_atoms, nRs2 * n_elements + nRs3 * nTs * n_elementpairs)
     """
 
@@ -382,8 +382,8 @@ def generate_parkhill_acsf(xyzs, Zs, elements, element_pairs, rcut, acut,
         ang_rs = tf.constant(angular_rs, dtype=tf.float32)
         theta_s = tf.constant(theta_s, dtype=tf.float32)
         zeta_tf = tf.constant(zeta, dtype=tf.float32)
-        eta2_tf = tf.constant(eta2, dtype=tf.float32)
-        eta3_tf = tf.constant(eta3, dtype=tf.float32)
+        eta2_tf = tf.constant(eta, dtype=tf.float32)
+        eta3_tf = tf.constant(eta, dtype=tf.float32)
 
     ##  Calculating the radial part of the symmetry function
     # First obtaining all the terms in the sum
