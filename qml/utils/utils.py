@@ -23,6 +23,9 @@
 
 import numpy as np
 
+def is_none(x):
+    return isinstance(x, type(None))
+
 def is_positive(x):
     return (not is_array_like(x) and _is_numeric(x) and x > 0)
 
@@ -258,6 +261,26 @@ def check_classes(classes):
         approved_classes = classes
 
     return approved_classes
+
+def check_dgdr(dgdr):
+    """
+    This function checks that the dimensions of the gradients of the descriptor with respect to the cartesian coordinates
+    makes sense.
+    :param dgdr: gradients of the descriptor with respect to the cartesian coordinates
+    :type dgdr: numpy array of shape (n_samples, n_atoms, n_features, n_atoms, 3)
+    :return: approved dgdr
+    """
+
+    if is_numeric_array(dgdr):
+        dgdr = np.asarray(dgdr)
+        if len(dgdr.shape) != 5 and dgdr.shape[1] != dgdr.shape[3] and dgdr.shape[-1] != 3:
+            raise InputError(
+                "The descriptor gradients wrt xyz should have a shape (n_samples, n_atoms, n_features, n_atoms, 3). Got %s" % (
+                    str(dgdr.shape)))
+    else:
+        raise InputError('Variable "dgdr" expected to be a numeric array.')
+
+    return dgdr
 
 #
 #def _is_numeric_array(x):
