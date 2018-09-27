@@ -2787,6 +2787,51 @@ class ARMP_G(ARMP, _NN):
                  rho=0.95, initial_accumulator_value=0.1, initial_gradient_squared_accumulator_value=0.1,
                  l1_regularization_strength=0.0, l2_regularization_strength=0.0,
                  tensorboard_subdir=os.getcwd() + '/tensorboard', representation_name='acsf', representation_params=None):
+        """
+        :param hidden_layer_sizes: Number of hidden layers. The n'th element represents the number of neurons in the n'th
+            hidden layer.
+        :type hidden_layer_size: Tuple of integers
+        :param l1_reg: L1-regularisation parameter for the neural network weights
+        :type l1_reg: float
+        :param l2_reg: L2-regularisation parameter for the neural network weights
+        :type l2_reg: float
+        :param batch_size: Size of minibatches for the ADAM optimizer. If set to 'auto' ``batch_size = min(200,n_samples)``
+        :type batch_size: integer
+        :param learning_rate: The learning rate in the numerical minimisation.
+        :type learning_rate: float
+        :param iterations: Total number of iterations that will be carried out during the training process.
+        :type iterations: integer
+        :param tf_dtype: Accuracy to use for floating point operations in tensorflow. 64 and 'float64' is recognised as tf.float64
+            and similar for tf.float32 and tf.float16.
+        :type tf_dtype: Tensorflow datatype
+        :param scoring_function: Scoring function to use. Available choices are 'mae', 'rmse', 'r2'.
+        :type scoring_function: string
+        :param activation_function: Activation function to use in the neural network. Currently 'sigmoid', 'tanh', 'elu', 'softplus',
+            'softsign', 'relu', 'relu6', 'crelu' and 'relu_x' is supported.
+        :type activation_function: Tensorflow datatype
+        :param beta1: parameter for AdamOptimizer
+        :type beta1: float
+        :param beta2: parameter for AdamOptimizer
+        :type beta2: float
+        :param epsilon: parameter for AdadeltaOptimizer
+        :type epsilon: float
+        :param rho: parameter for AdadeltaOptimizer
+        :type rho: float
+        :param initial_accumulator_value: parameter for AdagradOptimizer
+        :type initial_accumulator_value: float
+        :param initial_gradient_squared_accumulator_value: parameter for AdagradDAOptimizer
+        :type initial_gradient_squared_accumulator_value: float
+        :param l1_regularization_strength: parameter for AdagradDAOptimizer
+        :type l1_regularization_strength: float
+        :param l2_regularization_strength: parameter for AdagradDAOptimizer
+        :type l2_regularization_strength: float
+        :param tensorboard: Store summaries to tensorboard or not
+        :type tensorboard: boolean
+        :param store_frequency: How often to store summaries to tensorboard.
+        :type store_frequency: integer
+        :param tensorboard_subdir: Directory to store tensorboard data
+        :type tensorboard_subdir: string
+        """
 
         super(ARMP_G, self).__init__(hidden_layer_sizes, l1_reg, l2_reg, batch_size, learning_rate,
                                    iterations, tensorboard, store_frequency, tf_dtype, scoring_function,
