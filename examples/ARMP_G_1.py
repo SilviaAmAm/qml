@@ -45,4 +45,4 @@ score = estimator.score(idx)
 
 print("The mean absolute error is %s (kcal/mol)." % (str(-score)))
 
-energies_predict = estimator.predict(idx)
+energies_predict, forces_predict = estimator.predict(idx)
