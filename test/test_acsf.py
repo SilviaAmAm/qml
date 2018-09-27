@@ -28,9 +28,8 @@ as a comparison.
 import tensorflow as tf
 import numpy as np
 
-from qml.aglaia import symm_funct
-from qml.aglaia import np_symm_funct
-
+import qml.aglaia.symm_funct as symm_funct
+import qml.aglaia.np_symm_funct as np_symm_funct
 
 def test_acsf_1():
     """
