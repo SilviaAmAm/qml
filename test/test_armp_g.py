@@ -26,45 +26,47 @@ This test checks if all the ways of setting up the estimator ARMP work.
 
 import numpy as np
 from qml.aglaia.aglaia import ARMP_G
-from qml.aglaia.utils import InputError
+from qml.utils.utils import InputError
 import glob
-from qml.aglaia.utils import is_array_like
+from qml.utils.utils import is_array_like
 import os
+import shutil
+import tensorflow as tf
 
 def test_set_representation():
     """
     This function tests the function _set_representation.
     """
     try:
-        ARMP_G(representation='acsf', representation_params={'slatm_sigma12': 0.05})
+        ARMP_G(representation_name='acsf', representation_params={'slatm_sigma12': 0.05})
         raise Exception
     except InputError:
         pass
 
     try:
-        ARMP_G(representation='coulomb_matrix')
+        ARMP_G(representation_name='coulomb_matrix')
         raise Exception
     except InputError:
         pass
 
     try:
-        ARMP_G(representation='slatm')
+        ARMP_G(representation_name='slatm')
         raise Exception
     except InputError:
         pass
 
     parameters = {'rcut': 10.0, 'acut': 10.0, 'nRs2': 3, 'nRs3': 3, 'nTs': 2,
-                                      'zeta': 3.0, 'eta2': 2.0, 'eta3': 3.0}
+                                      'zeta': 3.0, 'eta': 2.0}
 
-    estimator = ARMP_G(representation='acsf', representation_params=parameters)
+    estimator = ARMP_G(representation_name='acsf', representation_params=parameters)
 
-    assert estimator.representation == 'acsf'
+    assert estimator.representation_name == 'acsf'
 
-    for key, value in estimator.representation_params.items():
+    for key, value in estimator.acsf_parameters.items():
         if is_array_like(value):
-            assert np.all(estimator.representation_params[key] == parameters[key])
+            assert np.all(estimator.acsf_parameters[key] == parameters[key])
         else:
-            assert estimator.representation_params[key] == parameters[key]
+            assert estimator.acsf_parameters[key] == parameters[key]
 
 def test_set_properties():
     """
@@ -142,103 +144,78 @@ def test_fit_1():
     filenames.sort()
     forces =  data["arr_3"][:2]
 
-    estimator = ARMP_G(representation="acsf")
+    estimator = ARMP_G(representation_name="acsf")
     estimator.generate_compounds(filenames[:2])
     estimator.set_properties(energies[:2])
     estimator.set_gradients(forces)
-    estimator.generate_representation()
 
     idx = np.arange(0, 2)
     estimator.fit(idx)
+    estimator.score(idx)
 
-def test_fit_2():
+def test_predict_fromxyz():
     """
-    This function tests the second way of fitting the representation: the data is passed by storing the compounds in the
-    class.
+    This test checks that the predictions from the "predict" and the "predict_from_xyz" functions are the same.
+    It also checks that if the model is saved, when the model is reloaded the predictions are still the same.
     """
-    test_dir = os.path.dirname(os.path.realpath(__file__))
 
-    data = np.load(test_dir + "/data/local_acsf_light.npz")
-    representation = data["arr_0"]
-    dg_dr = data["arr_1"]
-    energies = data["arr_2"]
-    forces = data["arr_3"]
-    classes = data["arr_4"]
+    tf.reset_default_graph()
 
-    estimator = ARMP_G()
-    estimator._set_representation(g=representation)
-    estimator.set_dgdr(dg_dr)
-    estimator.set_classes(classes=classes)
-    estimator.set_properties(energies)
-    estimator.set_gradients(forces)
+    xyz = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
+           [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
+           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
+    zs = np.array([[1, 2, 3],
+          [1, 2, 3],
+          [1, 2, 3]])
 
-    idx = np.arange(0, 2)
+    ene_true = np.array([0.5, 0.9, 1.0])
+    forces_true = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
+           [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
+           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
+
+    acsf_param = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
+    estimator = ARMP_G(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
+                     representation_params=acsf_param)
+
+    estimator.set_xyz(xyz)
+    estimator.set_classes(zs)
+    estimator.set_properties(ene_true)
+    estimator.set_gradients(forces_true)
+
+    idx = list(range(xyz.shape[0]))
+
     estimator.fit(idx)
 
-def test_fit_3():
-    """
-    This function tests the thrid way of fitting the representation: the data is passed directly to the fit function.
-    """
-    test_dir = os.path.dirname(os.path.realpath(__file__))
+    ene1, f1 = estimator.predict(idx)
+    ene2, f2 = estimator.predict_from_xyz(xyz, zs)
 
-    data = np.load(test_dir + "/data/local_acsf_light.npz")
-    representation = data["arr_0"]
-    dg_dr = data["arr_1"]
-    energies = data["arr_2"]
-    forces = data["arr_3"]
-    classes = data["arr_4"]
+    assert np.all(np.isclose(ene1, ene2, rtol=1.e-6))
 
-    estimator = ARMP_G()
-    estimator.fit(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
+    estimator.save_nn(save_dir="temp")
 
-def test_score_3():
-    """
-    This function tests that all the scoring functions work.
-    """
-    test_dir = os.path.dirname(os.path.realpath(__file__))
+    new_estimator = ARMP_G(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
+                         representation_params=acsf_param)
 
-    data = np.load(test_dir + "/data/local_acsf_light.npz")
-    representation = data["arr_0"]
-    dg_dr = data["arr_1"]
-    energies = data["arr_2"]
-    forces = data["arr_3"]
-    classes = data["arr_4"]
+    new_estimator.load_nn(save_dir="temp")
 
-    estimator_1 = ARMP_G(scoring_function='mae')
-    estimator_1.fit(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
-    estimator_1.score(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
+    new_estimator.set_xyz(xyz)
+    new_estimator.set_classes(zs)
+    new_estimator.set_properties(ene_true)
+    new_estimator.set_gradients(forces_true)
 
-    estimator_2 = ARMP_G(scoring_function='r2')
-    estimator_2.fit(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
-    estimator_2.score(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
+    ene3, f3 = new_estimator.predict(idx)
+    ene4, f4 = new_estimator.predict_from_xyz(xyz, zs)
 
-    estimator_3 = ARMP_G(scoring_function='rmse')
-    estimator_3.fit(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
-    estimator_3.score(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
+    shutil.rmtree("temp")
+    os.remove("predict.tfrecords")
+    os.remove("training.tfrecords")
 
-def test_predict_3():
-    test_dir = os.path.dirname(os.path.realpath(__file__))
-
-    data = np.load(test_dir + "/data/local_acsf_light.npz")
-    representation = data["arr_0"]
-    dg_dr = data["arr_1"]
-    energies = data["arr_2"]
-    forces = data["arr_3"]
-    classes = data["arr_4"]
-
-    estimator = ARMP_G()
-    estimator.fit(x=representation, y=energies, classes=classes, dy=forces, dgdr=dg_dr)
-    energies_pred, dy_pred = estimator.predict(x=representation, classes=classes, dgdr=dg_dr)
-
-    assert energies.shape == energies_pred.shape
-    assert forces.shape == dy_pred.shape
+    assert np.all(np.isclose(ene3, ene4, rtol=1.e-6))
+    assert np.all(np.isclose(ene1, ene3, rtol=1.e-6))
 
 if __name__ == "__main__":
     test_set_representation()
     test_set_properties()
     test_set_representation_and_dgdr()
     test_fit_1()
-    test_fit_2()
-    test_fit_3()
-    test_score_3()
-    test_predict_3()
+    test_predict_fromxyz()

@@ -722,7 +722,7 @@ def sum_ang_1(pre_sumterm, Zs, element_pairs_list, angular_rs, theta_s):
     return clean_final_term
 
 def generate_parkhill_acsf_single(xyzs, Zs, elements, element_pairs, rcut, acut,
-                           nRs2, nRs3, nTs, zeta, eta2, eta3):
+                           nRs2, nRs3, nTs, zeta, eta):
     """
     This function generates the atom centred symmetry function as used in the Tensormol paper. Currently only tested for
     single systems with many conformations. It requires the coordinates of all the atoms in a data sample, the atomic
@@ -739,7 +739,7 @@ def generate_parkhill_acsf_single(xyzs, Zs, elements, element_pairs, rcut, acut,
     :param nRs3: positive integer
     :param nTs: positive integer
     :param zeta: scalar float
-    :param eta2: scalar float
+    :param eta: scalar float
 
     :return: a tf tensor of shape (n_atoms, nRs2 * n_elements + nRs3 * nTs * n_elementpairs)
     """
@@ -755,8 +755,8 @@ def generate_parkhill_acsf_single(xyzs, Zs, elements, element_pairs, rcut, acut,
         ang_rs = tf.constant(angular_rs, dtype=tf.float32)
         theta_s = tf.constant(theta_s, dtype=tf.float32)
         zeta_tf = tf.constant(zeta, dtype=tf.float32)
-        eta2_tf = tf.constant(eta2, dtype=tf.float32)
-        eta3_tf = tf.constant(eta3, dtype=tf.float32)
+        eta2_tf = tf.constant(eta, dtype=tf.float32)
+        eta3_tf = tf.constant(eta, dtype=tf.float32)
 
     ##  Calculating the radial part of the symmetry function
     # First obtaining all the terms in the sum
