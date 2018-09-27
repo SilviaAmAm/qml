@@ -31,6 +31,7 @@ from qml.utils import InputError
 import glob
 import os
 import shutil
+import tensorflow as tf
 
 def test_set_representation():
     """
@@ -205,6 +206,8 @@ def test_predict_fromxyz():
     It also checks that if the model is saved, when the model is reloaded the predictions are still the same.
     """
 
+    tf.reset_default_graph()
+
     xyz = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
            [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
            [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
@@ -251,6 +254,9 @@ def test_predict_fromxyz():
     shutil.rmtree("temp")
 
 def test_retraining():
+
+    tf.reset_default_graph()
+
     xyz = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
                     [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
                     [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
