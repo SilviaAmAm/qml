@@ -3081,7 +3081,7 @@ class ARMP_G(ARMP, _NN):
         """
 
         if self.method == 'tf':
-            self._generate_rep_and_dgdr_tf(xyz, ene, classes, forces)
+            self._generate_rep_and_dgdr_tf(xyz, ene, classes, forces, purpose)
         else:
             self._generate_rep_and_dgdr_fortran(xyz, ene, classes, forces, purpose)
 
@@ -3139,29 +3139,39 @@ class ARMP_G(ARMP, _NN):
         else:
             self.dg_dr = check_dgdr(dgdr)
 
-    def _generate_rep_and_dgdr_tf(self, xyz, ene, classes, forces):
+    def _generate_rep_and_dgdr_tf(self, xyz, ene, classes, forces, purpose):
         """
         This function takes in the coordinates and the classes and returns the representation and its derivative with
-        respect to the cartesian coordinates.
+        respect to the cartesian coordinates, it then stores all the data set into a TFRecord file. It uses the TF implementation
+        of the representation and the gradients.
 
         :param xyz: cartesian coordinates
         :type xyz: numpy array of shape (n_samples, n_atoms, 3)
+        :param ene: the true energies
+        :type ene: numpy array of shape (n_samples, 1)
         :param classes: the atom types
         :type classes: numpy array of shape (n_samples, n_atoms)
+        :param forces: the true forces
+        :type forces: numpy array of shape (n_samples, n_atoms, 3)
+        :param purpose: flag to know whether the tf.record is generated for training, predicting or retraining.
+        :type purpose: string
         :return: representations and their derivatives wrt to xyz
         :rtype: numpy array of shape (n_samples, n_atoms, n_features) and (n_samples, n_atoms, n_features, n_atoms, 3)
         """
-        if is_none(self.element_pairs) and is_none(self.elements):
-            self.elements, self.element_pairs = self._get_elements_and_pairs(self.classes)
-            self.n_features = self.elements.shape[0] * self.acsf_parameters['nRs2'] + \
-                              self.element_pairs.shape[0] * self.acsf_parameters['nRs3'] * \
-                              self.acsf_parameters['nTs']
+
+        elements, element_pairs = self._get_elements_and_pairs(classes)
+
+        if purpose == "training":
+            writer = tf.python_io.TFRecordWriter("training.tfrecords")
+        elif purpose == "predict":
+            writer = tf.python_io.TFRecordWriter("predict.tfrecords")
+        elif purpose == "retraining":
+            writer = tf.python_io.TFRecordWriter("retraining.tfrecords")
+        else:
+            raise InputError("Wrong purpose for the TFRecord writer!")
 
         n_samples = xyz.shape[0]
         n_atoms = xyz.shape[1]
-
-        # NOTE: Resets graph, so make sure model is created afterwards
-        # tf.reset_default_graph()
 
         if self.tensorboard:
             self.tensorboard_logger_representation.initialise()
@@ -3177,8 +3187,8 @@ class ARMP_G(ARMP, _NN):
 
         with tf.name_scope("Descriptor"):
 
-            representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
-                                                           element_pairs=self.element_pairs,
+            representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
+                                                           element_pairs=element_pairs,
                                                            rcut=self.acsf_parameters['rcut'],
                                                            acut=self.acsf_parameters['acut'],
                                                            nRs2=self.acsf_parameters['nRs2'],
@@ -3193,51 +3203,74 @@ class ARMP_G(ARMP, _NN):
         sess.run(tf.global_variables_initializer())
         sess.run(iterator.make_initializer(dataset), feed_dict={xyz_tf: xyz, zs_tf: classes})
 
-        # Do representations and gradients one by one
-        gradients_slices = []
-        representation_slices = []
-
         if self.tensorboard:
             self.tensorboard_logger_representation.set_summary_writer(sess)
             counter = 0
+
             while True:
                 try:
-                    representation_np, gradient_np = sess.run([representation, jacobian],
+                    g, dg = sess.run([representation, jacobian],
                                                               options=self.tensorboard_logger_representation.options,
                                                               run_metadata=self.tensorboard_logger_representation.run_metadata)
                     self.tensorboard_logger_representation.write_metadata(counter)
-                    representation_slices.append(representation_np)
-                    gradients_slices.append(gradient_np)
+
+                    example = tf.train.Example(features=tf.train.Features(feature={
+                        'g_raw': self._bytes_feature(tf.compat.as_bytes(g.tostring())),
+                        'dg_raw': self._bytes_feature(tf.compat.as_bytes(dg.tostring())),
+                        'ene_raw': self._bytes_feature(tf.compat.as_bytes(ene[counter].tostring())),
+                        'zs_raw': self._bytes_feature(tf.compat.as_bytes(classes[counter].tostring())),
+                        'forces_raw': self._bytes_feature(tf.compat.as_bytes(forces[counter].tostring())),
+                    }))
+
+                    writer.write(example.SerializeToString())
+
                     counter += 1
                 except tf.errors.OutOfRangeError:
                     break
         else:
+            counter = 0
             while True:
                 try:
-                    representation_np, gradient_np = sess.run([representation, jacobian])
-                    representation_slices.append(representation_np)
-                    gradients_slices.append(gradient_np)
+                    g, dg = sess.run([representation, jacobian])
+
+                    example = tf.train.Example(features=tf.train.Features(feature={
+                        'g_raw': self._bytes_feature(tf.compat.as_bytes(g.tostring())),
+                        'dg_raw': self._bytes_feature(tf.compat.as_bytes(dg.tostring())),
+                        'ene_raw': self._bytes_feature(tf.compat.as_bytes(ene[counter].tostring())),
+                        'zs_raw': self._bytes_feature(tf.compat.as_bytes(classes[counter].tostring())),
+                        'forces_raw': self._bytes_feature(tf.compat.as_bytes(forces[counter].tostring())),
+                    }))
+
+                    writer.write(example.SerializeToString())
+
+                    counter += 1
                 except tf.errors.OutOfRangeError:
                     break
 
         sess.close()
-
-        return np.asarray(representation_slices), np.asarray(gradients_slices)
+        writer.close()
 
     def _generate_rep_and_dgdr_fortran(self, xyz, ene, classes, forces, purpose):
         """
-        This function uses fortran to generate the representation and the derivative of the representation with respect
-        to the cartesian coordinates.
+        This function takes in the coordinates and the classes and returns the representation and its derivative with
+        respect to the cartesian coordinates, it then stores all the data set into a TFRecord file. It uses the fortran
+        implementation of the representation and the gradients.
 
         :param xyz: cartesian coordinates
         :type xyz: numpy array of shape (n_samples, n_atoms, 3)
+        :param ene: the true energies
+        :type ene: numpy array of shape (n_samples, 1)
         :param classes: the atom types
         :type classes: numpy array of shape (n_samples, n_atoms)
+        :param forces: the true forces
+        :type forces: numpy array of shape (n_samples, n_atoms, 3)
+        :param purpose: flag to know whether the tf.record is generated for training, predicting or retraining.
+        :type purpose: string
         :return: representations and their derivatives wrt to xyz
         :rtype: numpy array of shape (n_samples, n_atoms, n_features) and (n_samples, n_atoms, n_features, n_atoms, 3)
         """
 
-        elements, element_paris = self._get_elements_and_pairs(classes)
+        elements, element_pairs = self._get_elements_and_pairs(classes)
 
         # Creating the tfrecord file that contains all the things that are needed for training
         if purpose == "training":
@@ -3348,20 +3381,20 @@ class ARMP_G(ARMP, _NN):
         with graph.as_default():
             # Reloading all the needed operations and tensors
             filename_tf = graph.get_tensor_by_name("Data/tfrecord_file:0")
+            tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
             init_iterator_op = graph.get_operation_by_name("dataset_init")
 
-            cost = graph.get_tensor_by_name("Cost/add_6:0")
-
             optimisation_op = graph.get_operation_by_name("optimisation_op")
-
-            # Recording cost to tensorboard
-            if self.tensorboard:
-                cost_summary = self.tensorboard_logger_training.write_cost_summary(cost)
 
             # Running the operations needed
             for i in range(self.iterations):
 
-                self.session.run(init_iterator_op, feed_dict={filename_tf: "retraining.tfrecords"})
+                if i % 2 == 0:
+                    buff = int(3.5 * batch_size)
+                else:
+                    buff = int(4.5 * batch_size)
+
+                self.session.run(init_iterator_op, feed_dict={filename_tf: "retraining.tfrecords", tf_buffer: buff})
 
                 for j in range(n_batches):
                     if self.tensorboard:
@@ -3373,7 +3406,7 @@ class ARMP_G(ARMP, _NN):
 
                 if self.tensorboard:
                     if i % self.tensorboard_logger_training.store_frequency == 0:
-                        self.session.run(init_iterator_op, feed_dict={filename_tf: "retraining.tfrecords"})
+                        self.session.run(init_iterator_op, feed_dict={filename_tf: "retraining.tfrecords", tf_buffer: buff})
                         self.tensorboard_logger_training.write_summary(self.session, i)
 
     def _fit_from_scratch(self, x, y, classes, dy, dgdr):
@@ -3424,11 +3457,11 @@ class ARMP_G(ARMP, _NN):
             filename = 'training.tfrecords'
             data_path = tf.placeholder(dtype=tf.string, name="tfrecord_file")
             # Buffer for shuffling
-            # buffer_tf = tf.placeholder(dtype=tf.int64, name="buffer")
+            buffer_tf = tf.placeholder(dtype=tf.int64, name="buffer")
             # Dataset pipeline
             dataset = tf.data.TFRecordDataset(data_path)
             dataset = dataset.map(self._read_from_tfrecord)
-            # dataset = dataset.shuffle(buffer_size=self.n_samples)
+            dataset = dataset.shuffle(buffer_size=buffer_tf)
             dataset = dataset.batch(batch_size).prefetch(2)
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_g, batch_dg_dr, batch_y, batch_dy, batch_zs = iterator.get_next()
@@ -3461,11 +3494,15 @@ class ARMP_G(ARMP, _NN):
             self.tensorboard_logger_training.set_summary_writer(self.session)
 
         self.session.run(init)
-        self.session.run(iterator_init, feed_dict={data_path: filename})
 
         for i in range(self.iterations):
 
-            self.session.run(iterator_init, feed_dict={data_path: filename})
+            if i % 2 == 0:
+                buff = int(3.5 * batch_size)
+            else:
+                buff = int(4.5 * batch_size)
+
+            self.session.run(iterator_init, feed_dict={data_path: filename, buffer_tf: buff})
 
             for j in range(n_batches):
                 if self.tensorboard:
@@ -3478,7 +3515,7 @@ class ARMP_G(ARMP, _NN):
             # Hence why I re-initialise the iterator
             if self.tensorboard:
                 if i % self.tensorboard_logger_training.store_frequency == 0:
-                    self.session.run(iterator_init, feed_dict={data_path: filename})
+                    self.session.run(iterator_init, feed_dict={data_path: filename, buffer_tf: buff})
                     self.tensorboard_logger_training.write_summary(self.session, i)
 
         # This is called so that predictions can be made from xyz as well as from the representation
@@ -3499,11 +3536,11 @@ class ARMP_G(ARMP, _NN):
 
         features = tf.parse_example([example_proto], features=feature)
 
-        g_1d = tf.decode_raw(features['g_raw'], tf.float64)
-        dg_1d = tf.decode_raw(features['dg_raw'], tf.float64)
-        ene_1d = tf.decode_raw(features['ene_raw'], tf.float64)
+        g_1d = tf.decode_raw(features['g_raw'], tf.float32)
+        dg_1d = tf.decode_raw(features['dg_raw'], tf.float32)
+        ene_1d = tf.decode_raw(features['ene_raw'], tf.float32)
         zs_1d = tf.decode_raw(features['zs_raw'], tf.int32)
-        forces_1d = tf.decode_raw(features['forces_raw'], tf.float64)
+        forces_1d = tf.decode_raw(features['forces_raw'], tf.float32)
 
         g = tf.cast(tf.reshape(g_1d, tf.stack([self.max_n_atoms, self.n_features])), tf.float32)
         ene = tf.cast(tf.reshape(ene_1d, tf.stack([1,])), tf.float32)
@@ -3554,8 +3591,8 @@ class ARMP_G(ARMP, _NN):
         x_approved, classes_approved = self._check_predict_input(x, classes, dgdr)
 
         # TODO find a cleaner way of doing this
-        empty_ene = np.empty((x_approved.shape[0], 1))
-        empty_forces = np.empty((x_approved.shape[0], x_approved.shape[1], 3))
+        empty_ene = np.empty((x_approved.shape[0], 1), dtype=np.float32)
+        empty_forces = np.empty((x_approved.shape[0], x_approved.shape[1], 3), dtype=np.float32)
 
         self._generate_dataset(x_approved, empty_ene, classes_approved, empty_forces, purpose="predict")
 
@@ -3566,12 +3603,13 @@ class ARMP_G(ARMP, _NN):
 
         with graph.as_default():
             filename_tf = graph.get_tensor_by_name("Data/tfrecord_file:0")
+            tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
             model = graph.get_tensor_by_name("Model/output:0")
             output_grad = graph.get_tensor_by_name("Model/output_grad:0")
 
             dataset_init_op = graph.get_operation_by_name("dataset_init")
 
-            self.session.run(dataset_init_op, feed_dict={filename_tf: "predict.tfrecords"})
+            self.session.run(dataset_init_op, feed_dict={filename_tf: "predict.tfrecords", tf_buffer:1})
 
             tot_y_pred = []
             tot_dy_pred = []
