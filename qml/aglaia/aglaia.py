@@ -3294,6 +3294,9 @@ class ARMP_G(ARMP, _NN):
                                   eta3=self.acsf_parameters['eta'],
                                   zeta=self.acsf_parameters['zeta'])
 
+            g = g.astype(dtype=np.float32)
+            dg = dg.astype(dtype=np.float32)
+
             example = tf.train.Example(features=tf.train.Features(feature={
                 'g_raw': self._bytes_feature(tf.compat.as_bytes(g.tostring())),
                 'dg_raw': self._bytes_feature(tf.compat.as_bytes(dg.tostring())),
