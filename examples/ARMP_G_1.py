@@ -1,7 +1,9 @@
 """
 This script shows how to set up the ARMP_G estimator where the xyz, nuclear charges, energies and forces are all set in
-advance. Then the indices are used to specify on which samples to train and the descripto/gradients are generated only
-for those samples.
+advance. Then the descriptors and the gradients are generated for all the samples. The indices are used to specify on
+which samples to train/predict.
+
+This script takes about 5 s to run.
 """
 
 from qml.aglaia.aglaia import ARMP_G
@@ -22,21 +24,22 @@ print(xyz.shape, zs.shape, ene.shape, forces.shape)
 
 ## ------------- ** Setting up the estimator ** ---------------
 
-estimator = ARMP_G(iterations=1, representation='acsf', representation_params={"radial_rs": np.arange(0, 10, 2), "angular_rs": np.arange(0.5, 10.5, 2),
-"theta_s": np.arange(0, 3.14, 2.5)}, tensorboard=False, store_frequency=1, batch_size=10)
+acsf_params={"nRs2":5, "nRs3":5, "nTs":5, "rcut":5, "acut":5, "zeta":220.127, "eta":30.8065}
+estimator = ARMP_G(iterations=10, hidden_layer_sizes=(10, 5, 2), representation_name='acsf',
+                   representation_params=acsf_params, tensorboard=False, store_frequency=1, batch_size=20)
 
-estimator.set_xyz(xyz)
-estimator.set_classes(zs)
-estimator.set_properties(ene)
-estimator.set_gradients(forces)
+estimator.set_xyz(xyz[:1])
+estimator.set_classes(zs[:1])
+estimator.set_properties(ene[:1])
+estimator.set_gradients(forces[:1])
 
-##  ------------- ** Fitting to the data ** ---------------
+estimator.generate_representation(method="fortran")
 
-idx = np.arange(0,5)
+## ----------- ** Fitting and predicting ** -------------------
+
+idx = np.arange(0,1)
 
 estimator.fit(idx)
-
-##  ------------- ** Predicting and scoring ** ---------------
 
 score = estimator.score(idx)
 
