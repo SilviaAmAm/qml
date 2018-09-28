@@ -3364,10 +3364,16 @@ class ARMP_G(ARMP, _NN):
         self._generate_dataset(x_approved, y_approved, classes_approved, dy_approved, purpose="retraining")
 
         if is_none(self.element_pairs) and is_none(self.elements):
-            self.elements, self.element_pairs = self._get_elements_and_pairs(classes_approved)
-            self.n_features = self.elements.shape[0] * self.representation_params['nRs2'] + \
-                              self.element_pairs.shape[0] * self.representation_params['nRs3'] * \
-                              self.representation_params['nTs']
+            if 0 in classes_approved:
+                idx_zeros = np.where(classes_approved == 0)[1]
+                classes_for_elements = classes_approved[:, :idx_zeros[0]]
+            else:
+                classes_for_elements = classes_approved
+            self.elements, self.element_pairs = self._get_elements_and_pairs(classes_for_elements)
+
+            self.n_features = len(self.elements) * self.acsf_parameters['nRs2'] + \
+                              len(self.element_pairs) * self.acsf_parameters['nRs3'] * \
+                              self.acsf_parameters['nTs']
 
         self.n_samples = x_approved.shape[0]
         self.max_n_atoms = x_approved.shape[1]
