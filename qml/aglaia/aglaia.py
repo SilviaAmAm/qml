@@ -2790,8 +2790,8 @@ class ARMP_G(ARMP, _NN):
 
             if is_none(self.xyz) or is_none(self.properties) or is_none(self.classes) or is_none(self.gradients):
                 if not is_none(self.compounds):
-                    self.xyz = self._get_xyz_from_compounds(x)
-                    self.classes = self._get_classes_from_compounds(x)
+                    self.xyz = self._get_xyz_from_compounds(x).astype(np.float32)
+                    self.classes = self._get_classes_from_compounds(x).astype(np.int32)
                 else:
                     raise InputError("The xyz coordinates and the classes need to have been set in advance.")
 
@@ -3650,7 +3650,7 @@ class ARMP_G(ARMP, _NN):
 
         with tf.name_scope("Descriptor_pred"):
 
-            batch_representation = generate_parkhill_acsf(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
+            batch_representation = generate_acsf_tf(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
                                                           element_pairs=self.element_pairs,
                                                           rcut=self.acsf_parameters['rcut'],
                                                           acut=self.acsf_parameters['acut'],

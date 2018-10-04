@@ -146,8 +146,8 @@ def test_fit_1():
 
     estimator = ARMP_G(representation_name="acsf")
     estimator.generate_compounds(filenames[:2])
-    estimator.set_properties(energies[:2])
-    estimator.set_gradients(forces)
+    estimator.set_properties(energies[:2].astype(np.float32))
+    estimator.set_gradients(forces.astype(np.float32))
 
     idx = np.arange(0, 2)
     estimator.fit(idx)
@@ -163,15 +163,15 @@ def test_predict_fromxyz():
 
     xyz = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
            [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
-           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
+           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]], dtype=np.float32)
     zs = np.array([[1, 2, 3],
           [1, 2, 3],
-          [1, 2, 3]])
+          [1, 2, 3]], dtype=np.int32)
 
-    ene_true = np.array([0.5, 0.9, 1.0])
+    ene_true = np.array([0.5, 0.9, 1.0], dtype=np.float32)
     forces_true = np.array([[[0, 1, 0], [0, 1, 1], [1, 0, 1]],
            [[1, 2, 2], [3, 1, 2], [1, 3, 4]],
-           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]])
+           [[4, 1, 2], [0.5, 5, 6], [-1, 2, 3]]], dtype=np.float32)
 
     acsf_param = {"nRs2": 5, "nRs3": 5, "nTs": 5, "rcut": 5, "acut": 5, "zeta": 220.127, "eta": 30.8065}
     estimator = ARMP_G(iterations=10, l1_reg=0.0001, l2_reg=0.005, learning_rate=0.0005, representation_name='acsf',
