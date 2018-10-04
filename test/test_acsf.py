@@ -138,6 +138,8 @@ def test_acsf_3():
     This test compares the one at a time tensorflow predictions to the numpy predictions.
     """
 
+    test_dir = os.path.dirname(os.path.realpath(__file__))
+
     nRs2 = 3
     nRs3 = 3
     nTs = 3
@@ -146,7 +148,7 @@ def test_acsf_3():
     zeta = 220.127
     eta = 30.8065
 
-    input_data = "/Volumes/Transcend/repositories/my_qml_fork/qml/test/data/data_test_acsf.npz"
+    input_data = test_dir + "/data/data_test_acsf.npz"
     data = np.load(input_data)
 
     xyzs = data["arr_0"]

@@ -1101,13 +1101,13 @@ class MRMP(_NN):
             raise InputError("Expected string for variable 'representation'. Got %s" % str(representation))
         if representation.lower() not in ['sorted_coulomb_matrix', 'unsorted_coulomb_matrix', 'bag_of_bonds', 'slatm']:
             raise InputError("Unknown representation %s" % representation)
-        self.representation = representation.lower()
+        self.representation_name = representation.lower()
 
         if parameters is not None:
             if not type(parameters) is dict:
                 raise InputError("The representation parameters passed should be either None or a dictionary.")
 
-        if self.representation == 'slatm':
+        if self.representation_name == 'slatm':
 
             self._set_slatm_parameters(parameters)
 
@@ -1160,7 +1160,7 @@ class MRMP(_NN):
 
         n_samples = len(self.compounds)
 
-        if self.representation == 'unsorted_coulomb_matrix':
+        if self.representation_name == 'unsorted_coulomb_matrix':
 
             nmax = self._get_msize()
             representation_size = (nmax*(nmax+1))//2
@@ -1169,7 +1169,7 @@ class MRMP(_NN):
                 mol.generate_coulomb_matrix(size = nmax, sorting = "unsorted")
                 x[i] = mol.representation
 
-        elif self.representation == 'sorted_coulomb_matrix':
+        elif self.representation_name == 'sorted_coulomb_matrix':
 
             nmax = self._get_msize()
             representation_size = (nmax*(nmax+1))//2
@@ -1178,7 +1178,7 @@ class MRMP(_NN):
                 mol.generate_coulomb_matrix(size = nmax, sorting = "row-norm")
                 x[i] = mol.representation
 
-        elif self.representation == "bag_of_bonds":
+        elif self.representation_name == "bag_of_bonds":
             asize = self._get_asize()
             x = np.empty(n_samples, dtype=object)
             for i, mol in enumerate(self.compounds):
@@ -1186,7 +1186,7 @@ class MRMP(_NN):
                 x[i] = mol.representation
             x = np.asarray(list(x), dtype=float)
 
-        elif self.representation == "slatm":
+        elif self.representation_name == "slatm":
             mbtypes = self._get_slatm_mbtypes([mol.nuclear_charges for mol in self.compounds])
             x = np.empty(n_samples, dtype=object)
             for i, mol in enumerate(self.compounds):
@@ -1201,7 +1201,7 @@ class MRMP(_NN):
 
         else:
 
-            raise InputError("This should never happen. Unrecognised representation. Got %s." % str(self.representation))
+            raise InputError("This should never happen. Unrecognised representation. Got %s." % str(self.representation_name))
 
         return x, None
 
@@ -2977,7 +2977,7 @@ class ARMP_G(ARMP, _NN):
 
         return element_weights, element_biases
 
-    def _cost_G(self, y_true, y_nn, dy_true, dy_nn, weights_dict):
+    def _cost_G(self, y_true, y_nn, dy_true, dy_nn, weights_dict, phi):
         """
         This function calculates the cost for the ARMP_G class. It uses both true energies/forces and the neural network
         predicted energies/forces.
@@ -2991,13 +2991,16 @@ class ARMP_G(ARMP, _NN):
         :param dy_nn: Neural network predicted gradients
         :type dy_nn: tf tensor of shape (n_sample, n_atoms, 3)
         :param weights_dict: dictionary containing the weights for each element specific network.
+        :param phi: parameter to weight the forces in the cost function
+        :type phi: float
         :return: tf.tensor of shape ()
         """
 
         ene_err = tf.square(tf.subtract(y_true, y_nn))
         force_err = tf.square(tf.subtract(dy_true, dy_nn))
+        phi_tf = tf.constant(phi, dtype=tf.float32)
 
-        cost_function = tf.add(tf.reduce_mean(ene_err), tf.reduce_mean(force_err), name="loss")
+        cost_function = tf.add(tf.reduce_mean(ene_err), tf.reduce_mean(force_err)*phi_tf, name="loss")
 
         if self.l2_reg >= 0:
             l2_loss = 0
@@ -3428,7 +3431,7 @@ class ARMP_G(ARMP, _NN):
 
         # Calculating the cost
         with tf.name_scope("Cost"):
-            cost = self._cost_G(batch_y, energies, batch_dy, forces, element_weights)
+            cost = self._cost_G(batch_y, energies, batch_dy, forces, element_weights, 1.0)
 
         if self.tensorboard:
             cost_summary = self.tensorboard_logger_training.write_cost_summary(cost)
