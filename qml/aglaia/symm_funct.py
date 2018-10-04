@@ -764,7 +764,7 @@ def sum_ang_1(pre_sumterm, Zs, element_pairs_list, angular_rs, theta_s):
 
     return clean_final_term
 
-def generate_parkhill_acsf_single(xyzs, Zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta):
+def generate_acsf_tf_single(xyzs, Zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta):
     """
     This function generates the atom centred symmetry function as used in the Tensormol paper. Currently only tested for
     single systems with many conformations. It requires the coordinates of all the atoms in a data sample, the atomic

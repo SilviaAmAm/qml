@@ -136,6 +136,7 @@ def test_acsf_3():
     """
     This test compares the one at a time tensorflow predictions to the numpy predictions.
     """
+    test_dir = os.path.dirname(os.path.realpath(__file__))
 
     nRs2 = 3
     nRs3 = 3
@@ -145,7 +146,7 @@ def test_acsf_3():
     zeta = 220.127
     eta = 30.8065
 
-    input_data = "/Volumes/Transcend/repositories/my_qml_fork/qml/test/data/data_test_acsf.npz"
+    input_data = test_dir + "/data/data_test_acsf.npz"
     data = np.load(input_data)
 
     xyzs = data["arr_0"]
@@ -165,9 +166,9 @@ def test_acsf_3():
         batch_xyz, batch_zs = iterator.get_next()
 
     with tf.name_scope("Descriptor"):
-        representation = symm_funct.generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
-                                                       element_pairs=element_pairs, rcut=rcut, acut=acut,
-                                                       nRs2=nRs2, nRs3=nRs3, nTs=nTs, eta=eta, zeta=zeta)
+        representation = symm_funct.generate_acsf_tf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
+                                                            element_pairs=element_pairs, rcut=rcut, acut=acut,
+                                                            nRs2=nRs2, nRs3=nRs3, nTs=nTs, eta=eta, zeta=zeta)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
