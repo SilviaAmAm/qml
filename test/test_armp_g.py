@@ -135,6 +135,7 @@ def test_fit_1():
     This function tests the first way of fitting the representation: the data is passed by first creating compounds and then
     the representations are created from the compounds.
     """
+    tf.reset_default_graph()
     test_dir = os.path.dirname(os.path.realpath(__file__))
 
     filenames = glob.glob(test_dir + "/CN_isopentane/*.xyz")
