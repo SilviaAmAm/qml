@@ -26,7 +26,9 @@ Various routines related to tensorflow
 """
 
 import os
+import numpy as np
 import tensorflow as tf
+
 # Remove packages below when TF 1.10 is released
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
@@ -35,6 +37,8 @@ from tensorflow.python.ops import gradients as gradient_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.util import nest
 from tensorflow.python.ops import tensor_array_ops
+from qml.utils import ceil
+
 
 class TensorBoardLogger(object):
     """
@@ -181,3 +185,49 @@ def partial_derivatives_batch(output, inp):
     output = array_ops.transpose(pfor_output, [1, 0, 2])
     new_shape = array_ops.concat([output_shape, inp_shape[1:]], axis=0)
     return array_ops.reshape(output, new_shape)
+
+def generate_weights(n_in, n_out, hl):
+
+    weights = []
+    biases = []
+
+    # Support for linear models
+    if len(hl) == 0:
+        # Weights from input layer to first hidden layer
+        w = tf.Variable(tf.truncated_normal([n_out, n_in], stddev = 1.0, dtype = tf.float32),
+                    dtype = tf.float32, name = "weights_in")
+        b = tf.Variable(tf.zeros([n_out], dtype = tf.float32), name="bias_in", dtype = tf.float32)
+
+        weights.append(w)
+        biases.append(b)
+
+        return weights, biases
+
+    # Weights from input layer to first hidden layer
+    w = tf.Variable(tf.truncated_normal([hl[0], n_in], stddev = 1.0 / np.sqrt(hl[0]), dtype = tf.float32),
+                dtype = tf.float32, name = "weights_in")
+    b = tf.Variable(tf.zeros([hl[0]], dtype = tf.float32), name="bias_in", dtype = tf.float32)
+
+    weights.append(w)
+    biases.append(b)
+
+    # Weights from one hidden layer to the next
+    for i in range(1, len(hl)):
+        w = tf.Variable(tf.truncated_normal([hl[i], hl[i-1]], stddev=1.0 / np.sqrt(hl[i-1]), dtype=tf.float32),
+                        dtype=tf.float32, name="weights_hidden_%d" % i)
+        b = tf.Variable(tf.zeros([hl[i]], dtype=tf.float32), name="bias_hidden_%d" % i, dtype=tf.float32)
+
+        weights.append(w)
+        biases.append(b)
+
+
+    # Weights from last hidden layer to output layer
+    w = tf.Variable(tf.truncated_normal([n_out, hl[-1]],
+                                        stddev=1.0 / np.sqrt(hl[-1]), dtype=tf.float32),
+                    dtype=tf.float32, name="weights_out")
+    b = tf.Variable(tf.zeros([n_out], dtype=tf.float32), name="bias_out", dtype=tf.float32)
+
+    weights.append(w)
+    biases.append(b)
+
+    return weights, biases

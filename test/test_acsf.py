@@ -27,9 +27,11 @@ as a comparison.
 
 import tensorflow as tf
 import numpy as np
+import os
 
 import qml.aglaia.symm_funct as symm_funct
 import qml.aglaia.np_symm_funct as np_symm_funct
+
 
 def test_acsf_1():
     """
@@ -37,6 +39,8 @@ def test_acsf_1():
     The test system consists of 5 configurations of CH4 + CN radical.
     :return: None
     """
+
+    test_dir = os.path.dirname(os.path.realpath(__file__))
 
     nRs2 = 3
     nRs3 = 3
@@ -46,7 +50,8 @@ def test_acsf_1():
     zeta = 220.127
     eta = 30.8065
 
-    input_data = "/Volumes/Transcend/repositories/my_qml_fork/qml/test/data/data_test_acsf.npz"
+    input_data = test_dir + "/data/data_test_acsf.npz"
+
     data = np.load(input_data)
 
     xyzs = data["arr_0"]
@@ -61,13 +66,13 @@ def test_acsf_1():
         zs_tf = tf.placeholder(shape=[n_samples, n_atoms], dtype=tf.int32, name="zs")
         xyz_tf = tf.placeholder(shape=[n_samples, n_atoms, 3], dtype=tf.float32, name="xyz")
 
-    acsf_tf_t = symm_funct.generate_parkhill_acsf(xyz_tf, zs_tf, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
+    acsf_tf_t = symm_funct.generate_acsf_tf(xyz_tf, zs_tf, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     acsf_tf = sess.run(acsf_tf_t, feed_dict={xyz_tf: xyzs, zs_tf: zs})
 
-    acsf_np = np_symm_funct.generate_acsf(xyzs, zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
+    acsf_np = np_symm_funct.generate_acsf_np(xyzs, zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
 
     n_samples = xyzs.shape[0]
     n_atoms = xyzs.shape[1]
@@ -84,6 +89,9 @@ def test_acsf_2():
     The test system consists of 10 molecules from the QM7 data set.
     :return: None
     """
+
+    test_dir = os.path.dirname(os.path.realpath(__file__))
+
     nRs2 = 3
     nRs3 = 3
     nTs = 3
@@ -92,7 +100,8 @@ def test_acsf_2():
     zeta = 220.127
     eta = 30.8065
 
-    input_data = "/Volumes/Transcend/repositories/my_qml_fork/qml/test/data/qm7_testdata.npz"
+    input_data = test_dir + "/data/qm7_testdata.npz"
+
     data = np.load(input_data)
 
     xyzs = data["arr_0"]
@@ -107,13 +116,13 @@ def test_acsf_2():
         zs_tf = tf.placeholder(shape=[n_samples, max_n_atoms], dtype=tf.int32, name="zs")
         xyz_tf = tf.placeholder(shape=[n_samples, max_n_atoms, 3], dtype=tf.float32, name="xyz")
 
-    acsf_tf_t = symm_funct.generate_parkhill_acsf(xyz_tf, zs_tf, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
+    acsf_tf_t = symm_funct.generate_acsf_tf(xyz_tf, zs_tf, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     acsf_tf = sess.run(acsf_tf_t, feed_dict={xyz_tf: xyzs, zs_tf: zs})
 
-    acsf_np = np_symm_funct.generate_acsf(xyzs, zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
+    acsf_np = np_symm_funct.generate_acsf_np(xyzs, zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
 
     for i in range(n_samples):
         for j in range(max_n_atoms):
@@ -157,9 +166,9 @@ def test_acsf_3():
         batch_xyz, batch_zs = iterator.get_next()
 
     with tf.name_scope("Descriptor"):
-        representation = symm_funct.generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
-                                                       element_pairs=element_pairs, rcut=rcut, acut=acut,
-                                                       nRs2=nRs2, nRs3=nRs3, nTs=nTs, eta=eta, zeta=zeta)
+        representation = symm_funct.generate_acsf_tf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
+                                                            element_pairs=element_pairs, rcut=rcut, acut=acut,
+                                                            nRs2=nRs2, nRs3=nRs3, nTs=nTs, eta=eta, zeta=zeta)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
@@ -175,7 +184,7 @@ def test_acsf_3():
 
     tf_acsf = np.asarray(tf_acsf)
 
-    acsf_np = np_symm_funct.generate_acsf(xyzs, zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
+    acsf_np = np_symm_funct.generate_acsf_np(xyzs, zs, elements, element_pairs, rcut, acut, nRs2, nRs3, nTs, zeta, eta)
 
     for i in range(n_samples):
         for j in range(n_atoms):

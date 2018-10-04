@@ -30,26 +30,18 @@ import numpy as np
 import tensorflow as tf
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.base import BaseEstimator
-from .symm_funct import generate_parkhill_acsf, generate_parkhill_acsf_single
+
+from .symm_funct import generate_acsf_tf, generate_acsf_tf_single
 from ..utils.utils import InputError, ceil, is_positive_or_zero, is_positive_integer, is_positive, \
         is_bool, is_positive_integer_or_zero, is_string, is_positive_integer_array, is_array_like, \
         check_global_representation, check_y, check_sizes, check_dy, check_classes, is_numeric_array, is_non_zero_integer, \
     is_positive_integer_or_zero_array, check_local_representation, check_dgdr, is_none
 from qml.aglaia.tf_utils import TensorBoardLogger, partial_derivatives
 from qml.representations import generate_acsf
-from qml.aglaia.graceful_killer import GracefulKiller
+from qml.aglaia.graceful_killer import _GracefulKiller
+from qml.data import Compound
+from qml import representations as qml_rep
 
-
-try:
-    from qml.data import Compound
-    from qml import representations as qml_rep
-except ImportError:
-    raise ImportError("The module qml is required")
-
-try:
-    import tensorflow
-except ImportError:
-    raise ImportError("Tensorflow 1.8 is required to run neural networks.")
 
 class _NN(BaseEstimator):
 
@@ -739,7 +731,8 @@ class _NN(BaseEstimator):
         elif xyz is None:
             # Make representations from compounds
 
-            self.g, self.classes = self._generate_representations_from_compounds()
+            self.g, self.classes = self._generate_representations_from_compounds(method)
+
         else:
             raise InputError("Compounds have already been set but new xyz data is being passed.")
 
@@ -1152,10 +1145,12 @@ class MRMP(_NN):
         # TODO implement
         raise InputError("Not implemented yet. Use compounds.")
 
-    def _generate_representations_from_compounds(self):
+    def _generate_representations_from_compounds(self, method):
         """
         This function generates the representations from the compounds.
 
+        :param method: flag that tells whether to use fortran or tensrflow implementation when there is a choice (here there is only fortran)
+        :type method: string
         :return: the representation and None (in the ARMP class this would be the classes for atomic decomposition)
         :rtype: numpy array of shape (n_samples, n_features) and None
         """
@@ -1662,7 +1657,7 @@ class ARMP(_NN):
         if not is_string(representation):
             raise InputError("Expected string for variable 'representation'. Got %s" % str(representation))
         if representation.lower() not in ['slatm', 'acsf']:
-            raise InputError("Unknown representation %s" % representation)
+            raise InputError("Representation %s not implemented." % representation)
         self.representation_name = representation.lower()
 
         if parameters is not None:
@@ -1723,13 +1718,17 @@ class ARMP(_NN):
 
         elif self.representation_name == 'acsf':
             if method == 'tf':
-                representation = self._generate_acsf_from_data_tf(xyz, classes)
+                representation = self._generate_acsf_tf(xyz, classes)
             else:
-                representation = self._generate_acsf_from_data_fortran(xyz, classes)
+                representation = self._generate_acsf_fortran(xyz, classes)
 
-        return representation, classes
+        # Hotfix t make sure the representation is single precision
+        single_precision_representation = representation.astype(dtype=np.float32)
+        del representation
 
-    def _generate_acsf_from_data_tf(self, xyz, classes):
+        return single_precision_representation, classes
+
+    def _generate_acsf_tf(self, xyz, classes):
         """
         This function generates the acsf from the cartesian coordinates and the classes.
 
@@ -1765,14 +1764,13 @@ class ARMP(_NN):
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_xyz, batch_zs = iterator.get_next()
 
-        representation = generate_parkhill_acsf(xyzs=batch_xyz, Zs=batch_zs, elements=elements, element_pairs=element_pairs,
-                                            rcut=self.acsf_parameters['rcut'],
-                                            acut=self.acsf_parameters['acut'],
-                                            nRs2=self.acsf_parameters['nRs2'],
-                                            nRs3=self.acsf_parameters['nRs3'],
-                                            nTs=self.acsf_parameters['nTs'],
-                                            eta=self.acsf_parameters['eta'],
-                                            zeta=self.acsf_parameters['zeta'])
+        representation = generate_acsf_tf(xyzs=batch_xyz, Zs=batch_zs, elements=elements, element_pairs=element_pairs,
+                                          rcut=self.acsf_parameters['rcut'],
+                                          acut=self.acsf_parameters['acut'],
+                                          nRs2=self.acsf_parameters['nRs2'],
+                                          nRs3=self.acsf_parameters['nRs3'],
+                                          nTs=self.acsf_parameters['nTs'], eta=self.acsf_parameters['eta'],
+                                          zeta=self.acsf_parameters['zeta'])
 
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
@@ -1809,7 +1807,7 @@ class ARMP(_NN):
 
         return representation_conc
 
-    def _generate_acsf_from_data_fortran(self, xyz, classes):
+    def _generate_acsf_fortran(self, xyz, classes):
         """
         This function uses fortran to generate the representation and the derivative of the representation with respect
         to the cartesian coordinates.
@@ -1829,7 +1827,7 @@ class ARMP(_NN):
 
         for i in range(xyz.shape[0]):
             if 0 in classes[i]:
-                idx_zeros = np.where(classes == 0)[1]
+                idx_zeros = np.where(classes[i] == 0)[0]
                 mol_xyz = xyz[i, :idx_zeros[0], :]
                 mol_classes = classes[i, :idx_zeros[0]]
 
@@ -1864,7 +1862,7 @@ class ARMP(_NN):
 
         return np.asarray(representation)
 
-    def _generate_representations_from_compounds(self):
+    def _generate_representations_from_compounds(self, method):
         """
         This function generates the representations from the compounds.
         :return: the representations and the classes
@@ -1880,22 +1878,30 @@ class ARMP(_NN):
 
         elif self.representation_name == 'acsf':
 
-            representations, classes = self._generate_acsf_from_compounds()
+            xyz, classes = self._extract_and_pad()
+            if method == "tf":
+                representations = self._generate_acsf_tf(xyz, classes)
+            elif method == "fortran":
+                representations = self._generate_acsf_fortran(xyz, classes)
+            else:
+                raise InputError("Method not recognised.")
 
         else:
             raise InputError("This should never happen, unrecognised representation %s." % (self.representation_name))
 
-        return representations, classes
+        # Hotfix t make sure the representation is single precision
+        single_precision_representation = representations.astype(dtype=np.float32)
+        del representations
 
-    def _generate_acsf_from_compounds(self):
+        return single_precision_representation, classes
+
+    def _extract_and_pad(self):
         """
-        This function generates the atom centred symmetry functions.
-
-        :return: representation acsf and classes
-        :rtype: numpy array of shape (n_samples, n_atoms, n_features) and (n_samples, n_atoms)
+        This function extracts cartesian coordinates and nuclear charges for the compounds and pads them.
+        :return: xyz and zs padded
+        :rtype: numpy arrays of shape (n_samples, max_n_atoms, 3) and (n_samples, max_n_atoms)
         """
-
-        # Obtaining the xyz and the nuclear charges
+        # Obtaining the xyz and the nuclear charges from the compounds
         xyzs = []
         zs = []
         max_n_atoms = 0
@@ -1906,80 +1912,18 @@ class ARMP(_NN):
             if len(compound.nuclear_charges) > max_n_atoms:
                 max_n_atoms = len(compound.nuclear_charges)
 
-        elements, element_pairs = self._get_elements_and_pairs(zs)
+        n_samples = len(xyzs)
 
-        # Padding so that all the samples have the same shape
-        n_samples = len(zs)
+        # Padding the xyz and the nuclear charges
+        padded_xyz = np.zeros((n_samples, max_n_atoms, 3))
+        padded_zs = np.zeros((n_samples, max_n_atoms))
+
         for i in range(n_samples):
-            current_n_atoms = len(zs[i])
-            missing_n_atoms = max_n_atoms - current_n_atoms
-            zs_padding = np.zeros(missing_n_atoms)
-            zs[i] = np.concatenate((zs[i], zs_padding))
-            xyz_padding = np.zeros((missing_n_atoms, 3))
-            xyzs[i] = np.concatenate((xyzs[i], xyz_padding))
+            current_n_atoms = xyzs[i].shape[0]
+            padded_xyz[i, :current_n_atoms, :] = xyzs[i]
+            padded_zs[i, :current_n_atoms] = zs[i]
 
-        zs = np.asarray(zs, dtype=np.int32)
-        xyzs = np.asarray(xyzs, dtype=np.float32)
-
-        if self.tensorboard:
-            self.tensorboard_logger_representation.initialise()
-            # run_metadata = tf.RunMetadata()
-            # options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-
-        # Turning the quantities into tensors
-        with tf.name_scope("Inputs"):
-            zs_tf = tf.placeholder(shape=[n_samples, max_n_atoms], dtype=tf.int32, name="zs")
-            xyz_tf = tf.placeholder(shape=[n_samples, max_n_atoms, 3], dtype=tf.float32, name="xyz")
-
-            dataset = tf.data.Dataset.from_tensor_slices((xyz_tf, zs_tf))
-            dataset = dataset.batch(20)
-            iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
-            batch_xyz, batch_zs = iterator.get_next()
-
-        representations = generate_parkhill_acsf(xyzs=batch_xyz, Zs=batch_zs, elements=elements, element_pairs=element_pairs,
-                                                 rcut=self.acsf_parameters['rcut'],
-                                                 acut=self.acsf_parameters['acut'],
-                                                 nRs2=self.acsf_parameters['nRs2'],
-                                                 nRs3=self.acsf_parameters['nRs3'],
-                                                 nTs=self.acsf_parameters['nTs'],
-                                                 eta=self.acsf_parameters['eta'],
-                                                 zeta=self.acsf_parameters['zeta'])
-
-        sess = tf.Session()
-        sess.run(tf.global_variables_initializer())
-        sess.run(iterator.make_initializer(dataset), feed_dict={xyz_tf: xyzs, zs_tf: zs})
-
-        representations_slices = []
-
-        if self.tensorboard:
-            self.tensorboard_logger_representation.set_summary_writer(sess)
-
-            batch_counter = 0
-            while True:
-                try:
-                    representations_np = sess.run(representations, options=self.tensorboard_logger_representation.options,
-                                             run_metadata=self.tensorboard_logger_representation.run_metadata)
-                    self.tensorboard_logger_representation.write_metadata(batch_counter)
-
-                    representations_slices.append(representations_np)
-                    batch_counter += 1
-                except tf.errors.OutOfRangeError:
-                    break
-        else:
-            batch_counter = 0
-            while True:
-                try:
-                    representations_np = sess.run(representations)
-                    representations_slices.append(representations_np)
-                    batch_counter += 1
-                except tf.errors.OutOfRangeError:
-                    break
-
-        representation_conc = np.concatenate(representations_slices, axis=0)
-
-        sess.close()
-
-        return representation_conc, zs
+        return padded_xyz, padded_zs
 
     def _generate_slatm_from_compounds(self):
         """
@@ -2421,7 +2365,7 @@ class ARMP(_NN):
         self.session.run(init)
 
         # Initialising the object that enables graceful killing of the training
-        killer = GracefulKiller()
+        killer = _GracefulKiller()
 
         for i in range(self.iterations):
 
@@ -2506,7 +2450,7 @@ class ARMP(_NN):
             dataset_init_op = graph.get_operation_by_name("dataset_init")
 
         # Initialising the object that enables graceful killing of the training
-        killer = GracefulKiller()
+        killer = _GracefulKiller()
 
         for i in range(self.iterations):
 
@@ -2556,15 +2500,15 @@ class ARMP(_NN):
             iterator_init = iterator.make_initializer(dataset, name="dataset_init_pred")
 
         with tf.name_scope("Descriptor_pred"):
-            batch_representation = generate_parkhill_acsf(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
-                                                          element_pairs=self.element_pairs,
-                                                          rcut=self.acsf_parameters['rcut'],
-                                                          acut=self.acsf_parameters['acut'],
-                                                          nRs2=self.acsf_parameters['nRs2'],
-                                                          nRs3=self.acsf_parameters['nRs3'],
-                                                          nTs=self.acsf_parameters['nTs'],
-                                                          eta=self.acsf_parameters['eta'],
-                                                          zeta=self.acsf_parameters['zeta'])
+            batch_representation = generate_acsf_tf(xyzs=batch_xyz, Zs=batch_zs, elements=self.elements,
+                                                    element_pairs=self.element_pairs,
+                                                    rcut=self.acsf_parameters['rcut'],
+                                                    acut=self.acsf_parameters['acut'],
+                                                    nRs2=self.acsf_parameters['nRs2'],
+                                                    nRs3=self.acsf_parameters['nRs3'],
+                                                    nTs=self.acsf_parameters['nTs'],
+                                                    eta=self.acsf_parameters['eta'],
+                                                    zeta=self.acsf_parameters['zeta'])
 
         with tf.name_scope("Model_pred"):
             batch_energies_nn = self._model(batch_representation, batch_zs, element_weights, element_biases)
@@ -3187,15 +3131,15 @@ class ARMP_G(ARMP, _NN):
 
         with tf.name_scope("Descriptor"):
 
-            representation = generate_parkhill_acsf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
-                                                           element_pairs=element_pairs,
-                                                           rcut=self.acsf_parameters['rcut'],
-                                                           acut=self.acsf_parameters['acut'],
-                                                           nRs2=self.acsf_parameters['nRs2'],
-                                                           nRs3=self.acsf_parameters['nRs3'],
-                                                           nTs=self.acsf_parameters['nTs'],
-                                                           eta=self.acsf_parameters['eta'],
-                                                           zeta=self.acsf_parameters['zeta'])
+            representation = generate_acsf_tf_single(xyzs=batch_xyz, Zs=batch_zs, elements=elements,
+                                                     element_pairs=element_pairs,
+                                                     rcut=self.acsf_parameters['rcut'],
+                                                     acut=self.acsf_parameters['acut'],
+                                                     nRs2=self.acsf_parameters['nRs2'],
+                                                     nRs3=self.acsf_parameters['nRs3'],
+                                                     nTs=self.acsf_parameters['nTs'],
+                                                     eta=self.acsf_parameters['eta'],
+                                                     zeta=self.acsf_parameters['zeta'])
 
             jacobian = partial_derivatives(representation, batch_xyz)
 
