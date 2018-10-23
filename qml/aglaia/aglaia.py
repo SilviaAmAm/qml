@@ -745,7 +745,7 @@ class _NN(BaseEstimator):
 
             # Transforming data to bytes
             example = tf.train.Example(features=tf.train.Features(feature={
-                'representation_raw': self._bytes_feature(tf.compat.as_bytes(representation.tostring())),
+                'representation_raw': self._bytes_feature(tf.compat.as_bytes(representation[0].tostring())),
                 'energies_raw': self._bytes_feature(tf.compat.as_bytes(energies[i].tostring())),
                 'classes_raw': self._bytes_feature(tf.compat.as_bytes(classes[i].tostring())),
             }))
