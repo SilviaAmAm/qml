@@ -23,6 +23,9 @@
 
 import numpy as np
 
+def is_none(x):
+    return isinstance(x, type(None))
+
 def is_positive(x):
     return (not is_array_like(x) and is_numeric(x) and x > 0)
 

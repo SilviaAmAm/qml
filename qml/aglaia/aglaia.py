@@ -34,7 +34,7 @@ from .symm_funct import generate_acsf_tf
 from ..utils.utils import InputError, ceil, is_positive_or_zero, is_positive_integer, is_positive, \
         is_bool, is_positive_integer_or_zero, is_string, is_positive_integer_array, is_array_like, \
         check_global_representation, check_y, check_sizes, check_dy, check_classes, is_numeric_array, is_non_zero_integer, \
-    is_positive_integer_or_zero_array, check_local_representation
+    is_positive_integer_or_zero_array, check_local_representation, is_none
 
 from qml.aglaia.tf_utils import TensorBoardLogger
 from qml.representations import generate_acsf
@@ -700,6 +700,89 @@ class _NN(BaseEstimator):
         else:
             raise InputError("Compounds have already been set but new xyz data is being passed.")
 
+        # Flag saying that tfrecord is not being used
+        self.tfrecord = False
+
+    def generate_tfrecord_dataset(self, xyz, classes, energies, method='fortran', filename="train.tfrecord"):
+        """
+        Calculates the representation from xyz and classes and stores it with the energy into a tfrecord file.
+
+        :param xyz: the cartesian coordinates
+        :type xyz: numpy array of shape (n_samples, n_atoms, 3)
+        :param classes: the nuclear charges
+        :type classes: numpy array of shape (n_samples, n_atoms)
+        :param energies: the molecular energies
+        :type energies: numpy array of shape (n_samples,)
+        :param method: whether to use the tensorflow or fortran implementation of the representations
+        :type method: string 'tf' or 'fortran'
+        :param filename: name of the tfrecord file to create
+        :type filename: string
+        :return: None
+        """
+        self.elements, self.element_pairs = self._get_elements_and_pairs(classes)
+
+        writer = tf.python_io.TFRecordWriter(filename)
+
+        # Generating the representations
+        if self.compounds is None and xyz is None and classes is None:
+            raise InputError("QML compounds need to be created in advance or Cartesian coordinates need to be passed in "
+                             "order to generate the representation.")
+
+        if self.representation is not None:
+            raise InputError("The representations have already been set!")
+
+        if self.compounds is None:
+
+            representation, classes = self._generate_representations_from_data(xyz, classes, method)
+
+        elif xyz is None:
+            # Make representations from compounds
+
+            representation, classes = self._generate_representations_from_compounds(method)
+        else:
+            raise InputError("Compounds have already been set but new xyz data is being passed.")
+
+        # Checking the energies
+        if energies is None:
+            raise InputError("Energies cannot be set to none.")
+        else:
+            if is_numeric_array(energies) and np.asarray(energies).ndim == 1:
+                energies = np.asarray(energies).astype(np.float32)
+            else:
+                raise InputError(
+                    'Variable "energies" expected to be array like of dimension 1. Got %s' % str(energies))
+
+        # Checking that they have all the same number of dimensions
+        if representation.shape[0] != classes.shape[0] or representation.shape[0] != energies.shape[0]:
+            raise InputError("Coordinates, nuclear charges and energies need to have the same number of samples.")
+
+        n_features = representation.shape[-1]
+        n_atoms = representation.shape[1]
+        n_samples = representation.shape[0]
+
+        # Filling the tfrecord file
+        for i in range(representation.shape[0]):
+
+            # Transforming data to bytes
+            example = tf.train.Example(features=tf.train.Features(feature={
+                'representation_raw': self._bytes_feature(tf.compat.as_bytes(representation[i].tostring())),
+                'energies_raw': self._bytes_feature(tf.compat.as_bytes(energies[i].tostring())),
+                'classes_raw': self._bytes_feature(tf.compat.as_bytes(classes[i].tostring())),
+            }))
+
+            writer.write(example.SerializeToString())
+
+        writer.close()
+
+        del representation
+        del classes
+        del energies
+
+        self.tfrecord = True
+        self.n_atoms = n_atoms      # Needed to build the model from xyz
+        self.n_samples = n_samples      # required for the batch size
+        self.n_features = n_features    # required to initialise the weights
+
     def set_properties(self, properties):
         """
         Set properties. Needed to be called before fitting.
@@ -786,6 +869,17 @@ class _NN(BaseEstimator):
         """
 
         return self._fit(x, y, dy, classes)
+
+    def fit_from_tfrecord(self, filename="train.tfrecord"):
+        """
+        Trains the neural network from a tfrecord data set.
+
+        :param filename: name of the tfrecord dataset to use
+        :type filename: string
+        :return: None
+        """
+
+        self._fit_with_tfrecord(filename)
 
     def _check_slatm_values(self):
         """
@@ -997,6 +1091,28 @@ class _NN(BaseEstimator):
             return predictions.ravel()
         else:
             return predictions
+
+    def predict_with_tfrecord(self, filename="predict.tfrecord"):
+        """
+        This predicts the values of the energies from the representations and the classes contained in a tfrecord file.
+
+        :param filename: name of the tfrecord file
+        :type filename: string
+        :return:
+        """
+
+        predictions = self._predict_with_tfrecord(filename)
+
+        if predictions.ndim > 1 and predictions.shape[1] == 1:
+            return predictions.ravel()
+        else:
+            return predictions
+
+    def _int64_feature(self, value):
+        return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+    def _bytes_feature(self, value):
+        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 ### --------------------- ** Molecular representation - molecular properties network ** --------------------------------
 
@@ -1647,11 +1763,7 @@ class ARMP(_NN):
             else:
                 representation = self._generate_acsf_fortran(xyz, classes)
 
-        # Hotfix t make sure the representation is single precision
-        single_precision_representation = representation.astype(dtype=np.float32)
-        del representation
-
-        return single_precision_representation, classes
+        return representation, classes
 
     def _generate_acsf_tf(self, xyz, classes):
         """
@@ -1767,6 +1879,7 @@ class ARMP(_NN):
                                   eta3=self.acsf_parameters['eta'],
                                   zeta=self.acsf_parameters['zeta'])
 
+                g = g.astype(np.float32)
                 padded_g = np.zeros((initial_natoms, g.shape[-1]))
                 padded_g[:g.shape[0], :] = g
 
@@ -1784,6 +1897,7 @@ class ARMP(_NN):
                                   eta3=self.acsf_parameters['eta'],
                                   zeta=self.acsf_parameters['zeta'])
 
+                g = g.astype(np.float32)
                 representation.append(g)
 
         return np.asarray(representation)
@@ -1815,11 +1929,7 @@ class ARMP(_NN):
         else:
             raise InputError("This should never happen, unrecognised representation %s." % (self.representation_name))
 
-        # Hotfix t make sure the representation is single precision
-        single_precision_representation = representations.astype(dtype=np.float32)
-        del representations
-
-        return single_precision_representation, classes
+        return representations, classes
 
     def _extract_and_pad(self):
         """
@@ -2394,6 +2504,201 @@ class ARMP(_NN):
                                      feed_dict={tf_x: x_approved, tf_zs: classes_approved, tf_ene: y_approved, tf_buffer: buff})
                     self.tensorboard_logger_training.write_summary(self.session, i)
 
+    def _fit_with_tfrecord(self, filename):
+        """
+        Trains the neural network from a tfrecord data set.
+
+        :param filename: name of the tfrecord dataset to use
+        :type filename: string
+        :return: None
+        """
+        if not self.loaded_model:
+            self._fit_from_scratch_with_tfrecord(filename)
+        else:
+            self._fit_from_loaded_with_tfrecord(filename)
+
+    def _fit_from_scratch_with_tfrecord(self, filename):
+        """
+        Fits the data contained in the tfrecord data set with an atomic neural network.
+
+        :param filename: name of the tfrecord dataset to use
+        :type filename: string
+        :return: None
+        """
+        if is_none(self.elements) or is_none(self.element_pairs):
+            raise InputError("This should never happen.")
+
+        if self.tensorboard:
+            self.tensorboard_logger_training.initialise()
+
+        # Set the batch size
+        batch_size = self._get_batch_size()
+
+        with tf.name_scope("Data"):
+            data_path = tf.placeholder(dtype=tf.string, name="tfrecord_file")
+            # Buffer for shuffling
+            buffer_tf = tf.placeholder(dtype=tf.int64, name="buffer")
+            # Dataset pipeline
+            dataset = tf.data.TFRecordDataset(data_path)
+            dataset = dataset.map(self._read_from_tfrecord)
+            dataset = dataset.batch(batch_size).prefetch(2)
+            dataset = dataset.shuffle(buffer_size=buffer_tf)
+            iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
+            batch_representation, batch_classes, batch_energies = iterator.get_next()
+
+        # Creating dictionaries of the weights and biases for each element
+        element_weights = {}
+        element_biases = {}
+
+        with tf.name_scope("Weights"):
+            for i in range(self.elements.shape[0]):
+                weights, biases = self._generate_weights(n_out=1)
+                element_weights[self.elements[i]] = weights
+                element_biases[self.elements[i]] = biases
+
+                # Log weights for tensorboard
+                if self.tensorboard:
+                    self.tensorboard_logger_training.write_weight_histogram(weights)
+
+        with tf.name_scope("Model"):
+            molecular_energies = self._model(batch_representation, batch_classes, element_weights, element_biases)
+
+        with tf.name_scope("Cost_func"):
+            cost = self._cost(molecular_energies, batch_energies, element_weights)
+
+        if self.tensorboard:
+            cost_summary = self.tensorboard_logger_training.write_cost_summary(cost)
+
+        optimiser = self._set_optimiser()
+        optimisation_op = optimiser.minimize(cost, name="optimisation_op")
+
+        # Initialisation of the variables
+        init = tf.global_variables_initializer()
+        iterator_init = iterator.make_initializer(dataset, name="dataset_init")
+
+        self._build_model_from_xyz(self.n_atoms, element_weights, element_biases)
+
+        self.session = tf.Session()
+
+        # Running the graph
+        if self.tensorboard:
+            self.tensorboard_logger_training.set_summary_writer(self.session)
+
+        self.session.run(init)
+
+        # Initialising the object that enables graceful killing of the training
+        killer = _GracefulKiller()
+
+        for i in range(self.iterations):
+
+            if i % 2 == 0:
+                buff = int(0.5 * batch_size)
+            else:
+                buff = int(1.5 * batch_size)
+
+            self.session.run(iterator_init, feed_dict={buffer_tf: buff, data_path: filename})
+
+            while True:
+                try:
+                    if self.tensorboard:
+                        self.session.run(optimisation_op,
+                                                  options=self.tensorboard_logger_training.options,
+                                                  run_metadata=self.tensorboard_logger_training.run_metadata)
+                    else:
+                        self.session.run(optimisation_op)
+                except tf.errors.OutOfRangeError:
+                    break
+
+                if killer.kill_now:
+                    self.save_nn("emergency_save")
+                    exit()
+
+            # This seems to run the iterator.get_next() op, which gives problems with end of sequence, hence why I re-initialise the iterator
+            if self.tensorboard:
+                if i % self.tensorboard_logger_training.store_frequency == 0:
+                    self.session.run(iterator_init, feed_dict={buffer_tf: buff, data_path: filename})
+                    self.tensorboard_logger_training.write_summary(self.session, i)
+
+    def _fit_from_loaded_with_tfrecord(self, filename):
+        """
+        Fits the data contained in the tfrecord data set with an atomic neural network that has already been partially
+        trained.
+
+        :param filename: name of the tfrecord dataset to use
+        :type filename: string
+        :return: None
+        """
+        if self.tensorboard:
+            self.tensorboard_logger_training.initialise()
+            self.tensorboard_logger_training.set_summary_writer(self.session)
+
+        batch_size = self._get_batch_size()
+        n_batches = ceil(self.n_samples, batch_size)
+
+        graph = tf.get_default_graph()
+
+        # Reloading the needed operations
+        with graph.as_default():
+            tf_data_path = graph.get_tensor_by_name("Data/tfrecord_file:0")
+            tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
+
+            optimisation_op = graph.get_operation_by_name("optimisation_op")
+            dataset_init_op = graph.get_operation_by_name("dataset_init")
+
+        # Initialising the object that enables graceful killing of the training
+        killer = _GracefulKiller()
+
+        for i in range(self.iterations):
+
+            if i % 2 == 0:
+                buff = int(0.5 * batch_size)
+            else:
+                buff = int(1.5 * batch_size)
+
+            self.session.run(dataset_init_op, feed_dict={tf_buffer: buff, tf_data_path: filename})
+
+            for j in range(n_batches):
+                if self.tensorboard:
+                    self.session.run(optimisation_op, options=self.tensorboard_logger_training.options,
+                                     run_metadata=self.tensorboard_logger_training.run_metadata)
+                else:
+                    self.session.run(optimisation_op)
+
+                if killer.kill_now:
+                    self.save_nn("emergency_save")
+                    exit()
+
+            if self.tensorboard:
+                if i % self.tensorboard_logger_training.store_frequency == 0:
+                    self.session.run(dataset_init_op, feed_dict={tf_buffer: buff, tf_data_path: filename})
+                    self.tensorboard_logger_training.write_summary(self.session, i)
+
+    def _read_from_tfrecord(self, example_proto):
+        """
+        This extracts the data from a serialised example of a tfrecord file
+
+        :param example_proto: serialised example
+        :return: the data
+        """
+
+        feature = {
+            'representation_raw': tf.FixedLenFeature([], tf.string),
+            'energies_raw': tf.FixedLenFeature([], tf.string),
+            'classes_raw': tf.FixedLenFeature([], tf.string)
+        }
+
+        features = tf.parse_example([example_proto], features=feature)
+
+        representation_1d = tf.decode_raw(features['representation_raw'], tf.float32)
+        energies_1d = tf.decode_raw(features['energies_raw'], tf.float32)
+        classes_1d = tf.decode_raw(features['classes_raw'], tf.int32)
+
+        representation = tf.cast(tf.reshape(representation_1d, tf.stack([self.n_atoms, self.n_features])), tf.float32)
+        energies = tf.cast(tf.reshape(energies_1d, tf.stack([1, ])), tf.float32)
+        classes = tf.cast(tf.reshape(classes_1d, tf.stack([self.n_atoms, ])), tf.int32)
+
+        return representation, classes, energies
+
     def _build_model_from_xyz(self, n_atoms, element_weights, element_biases):
         """
         This function builds a model that makes it possible to predict energies straight from xyz data. It constructs the
@@ -2459,6 +2764,39 @@ class ARMP(_NN):
             model = graph.get_tensor_by_name("Model/output:0")
             dataset_init_op = graph.get_operation_by_name("dataset_init")
             self.session.run(dataset_init_op, feed_dict={tf_x: approved_x, tf_zs: approved_classes, tf_true_ene: empty_ene, tf_buffer:1})
+
+        tot_y_pred = []
+
+        while True:
+            try:
+                y_pred = self.session.run(model)
+                tot_y_pred.append(y_pred)
+            except tf.errors.OutOfRangeError:
+                break
+
+        return np.concatenate(tot_y_pred, axis=0)
+
+    def _predict_with_tfrecord(self, filename):
+        """
+        This predicts the values of the energies from the representations and the classes contained in a tfrecord file.
+
+        :param filename: name of the tfrecord file
+        :type filename: string
+        :return: Energy predictions
+        """
+
+        if self.session == None:
+            raise InputError("Model needs to be fit before predictions can be made.")
+
+        graph = tf.get_default_graph()
+
+        with graph.as_default():
+            tf_data_path = graph.get_tensor_by_name("Data/tfrecord_file:0")
+            tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
+            model = graph.get_tensor_by_name("Model/output:0")
+            dataset_init_op = graph.get_operation_by_name("dataset_init")
+
+        self.session.run(dataset_init_op, feed_dict={tf_buffer: 1, tf_data_path: filename})
 
         tot_y_pred = []
 
@@ -2608,16 +2946,26 @@ class ARMP(_NN):
 
         graph = tf.get_default_graph()
 
-        with graph.as_default():
-            tf_x = graph.get_tensor_by_name("Data/Descriptors:0")
-            tf_zs = graph.get_tensor_by_name("Data/Atomic-numbers:0")
-            true_ene = graph.get_tensor_by_name("Data/Properties:0")
-            model = graph.get_tensor_by_name("Model/output:0")
+        if self.tfrecord:
+            with graph.as_default():
+                tf_data_path = graph.get_tensor_by_name("Data/tfrecord_file:0")
+                tf_buffer = graph.get_tensor_by_name("Data/buffer:0")
+                model = graph.get_tensor_by_name("Model/output:0")
 
-        tf.saved_model.simple_save(self.session, export_dir=save_dir,
-                                   inputs={"Data/Descriptors:0": tf_x, "Data/Atomic-numbers:0": tf_zs,
-                                           "Data/Properties:0": true_ene},
-                                   outputs={"Model/output:0": model})
+            tf.saved_model.simple_save(self.session, export_dir=save_dir,
+                                       inputs={"Data/tfrecord_file:0": tf_data_path, "Data/buffer:0": tf_buffer},
+                                       outputs={"Model/output:0": model})
+        else:
+            with graph.as_default():
+                tf_x = graph.get_tensor_by_name("Data/Descriptors:0")
+                tf_zs = graph.get_tensor_by_name("Data/Atomic-numbers:0")
+                true_ene = graph.get_tensor_by_name("Data/Properties:0")
+                model = graph.get_tensor_by_name("Model/output:0")
+
+            tf.saved_model.simple_save(self.session, export_dir=save_dir,
+                                       inputs={"Data/Descriptors:0": tf_x, "Data/Atomic-numbers:0": tf_zs,
+                                               "Data/Properties:0": true_ene},
+                                       outputs={"Model/output:0": model})
 
     def load_nn(self, save_dir="saved_model"):
         """
