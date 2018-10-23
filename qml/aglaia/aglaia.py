@@ -1648,7 +1648,7 @@ class ARMP(_NN):
                  activation_function = tf.sigmoid, optimiser = tf.train.AdamOptimizer, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-08,
                  rho = 0.95, initial_accumulator_value = 0.1, initial_gradient_squared_accumulator_value = 0.1,
                  l1_regularization_strength = 0.0, l2_regularization_strength = 0.0,
-                 tensorboard_subdir = os.getcwd() + '/tensorboard', representation_name='acsf', representation_params=None):
+                 tensorboard_subdir = os.getcwd() + '/tensorboard', representation_name='acsf', representation_params=None, prefetch=2):
         """
         To see what parameters are required, look at the description of the _NN class init.
         This class inherits from the _NN class and all inputs not unique to the ARMP class are passed to the _NN
@@ -1662,6 +1662,7 @@ class ARMP(_NN):
                  l1_regularization_strength,l2_regularization_strength, tensorboard_subdir)
 
         self._initialise_representation(representation_name, representation_params)
+        self._set_prefetch(prefetch)
 
     def _initialise_representation(self, representation, parameters):
         """
@@ -1697,6 +1698,19 @@ class ARMP(_NN):
 
             if parameters is not None:
                 raise InputError("The representation %s does not take any additional parameters." % (self.representation_name))
+
+    def _set_prefetch(self, prefetch):
+        """
+        This function sets the number of batches to prefetch during training.
+
+        :param prefetch: number of batches to prefetch
+        :type prefetch: positive int
+        :return: None
+        """
+        if is_positive_integer(prefetch):
+            self.prefetch = prefetch
+        else:
+            raise InputError("The prefetch should be a positive integer.")
 
     def _set_representation(self, representation):
 
@@ -2520,8 +2534,8 @@ class ARMP(_NN):
             # Dataset pipeline
             dataset = tf.data.TFRecordDataset(data_path)
             dataset = dataset.map(self._read_from_tfrecord)
-            dataset = dataset.batch(batch_size).prefetch(2)
             dataset = dataset.shuffle(buffer_size=buffer_tf)
+            dataset = dataset.batch(batch_size).prefetch(self.prefetch)
             iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
             batch_representation, batch_classes, batch_energies = iterator.get_next()
 
