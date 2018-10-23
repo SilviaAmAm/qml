@@ -731,7 +731,10 @@ class _NN(BaseEstimator):
                 energies = np.asarray(energies).astype(np.float32)
             else:
                 raise InputError(
-                    'Variable "energies" expected to be array like of dimension 1. Got %s' % str(energies))
+                    'Variable "energies" expected to be arrasy like of dimension 1. Got %s' % str(energies))
+
+        # Making sure the classes are int32
+        classes = classes.astype(np.int32)
 
         # Filling the tfrecord file
         for i in range(xyz.shape[0]):
@@ -1856,7 +1859,7 @@ class ARMP(_NN):
                                   zeta=self.acsf_parameters['zeta'])
 
                 g = g.astype(np.float32)
-                padded_g = np.zeros((initial_natoms, g.shape[-1]))
+                padded_g = np.zeros((initial_natoms, g.shape[-1]), dtype=np.float32)
                 padded_g[:g.shape[0], :] = g
 
                 representation.append(padded_g)
