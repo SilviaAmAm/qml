@@ -723,25 +723,6 @@ class _NN(BaseEstimator):
 
         writer = tf.python_io.TFRecordWriter(filename)
 
-        # Generating the representations
-        if self.compounds is None and xyz is None and classes is None:
-            raise InputError("QML compounds need to be created in advance or Cartesian coordinates need to be passed in "
-                             "order to generate the representation.")
-
-        if self.representation is not None:
-            raise InputError("The representations have already been set!")
-
-        if self.compounds is None:
-
-            representation, classes = self._generate_representations_from_data(xyz, classes, method)
-
-        elif xyz is None:
-            # Make representations from compounds
-
-            representation, classes = self._generate_representations_from_compounds(method)
-        else:
-            raise InputError("Compounds have already been set but new xyz data is being passed.")
-
         # Checking the energies
         if energies is None:
             raise InputError("Energies cannot be set to none.")
@@ -752,20 +733,19 @@ class _NN(BaseEstimator):
                 raise InputError(
                     'Variable "energies" expected to be array like of dimension 1. Got %s' % str(energies))
 
-        # Checking that they have all the same number of dimensions
-        if representation.shape[0] != classes.shape[0] or representation.shape[0] != energies.shape[0]:
-            raise InputError("Coordinates, nuclear charges and energies need to have the same number of samples.")
-
-        n_features = representation.shape[-1]
-        n_atoms = representation.shape[1]
-        n_samples = representation.shape[0]
-
         # Filling the tfrecord file
-        for i in range(representation.shape[0]):
+        for i in range(xyz.shape[0]):
+
+            if method == 'fortran':
+                representation = self._generate_acsf_fortran(np.expand_dims(xyz[i], axis=0), np.expand_dims(classes[i], axis=0))
+            elif method == 'tf':
+                raise NotImplementedError
+            else:
+                raise InputError("Method not recognised")
 
             # Transforming data to bytes
             example = tf.train.Example(features=tf.train.Features(feature={
-                'representation_raw': self._bytes_feature(tf.compat.as_bytes(representation[i].tostring())),
+                'representation_raw': self._bytes_feature(tf.compat.as_bytes(representation.tostring())),
                 'energies_raw': self._bytes_feature(tf.compat.as_bytes(energies[i].tostring())),
                 'classes_raw': self._bytes_feature(tf.compat.as_bytes(classes[i].tostring())),
             }))
@@ -774,14 +754,10 @@ class _NN(BaseEstimator):
 
         writer.close()
 
-        del representation
-        del classes
-        del energies
-
         self.tfrecord = True
-        self.n_atoms = n_atoms      # Needed to build the model from xyz
-        self.n_samples = n_samples      # required for the batch size
-        self.n_features = n_features    # required to initialise the weights
+        self.n_atoms = xyz.shape[1]      # Needed to build the model from xyz
+        self.n_samples = xyz.shape[0]      # required for the batch size
+        self.n_features = representation.shape[-1]    # required to initialise the weights
 
     def set_properties(self, properties):
         """
